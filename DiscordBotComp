@@ -203,27 +203,27 @@ async def help(ctx):
         color=discord.Color.purple()
     )
     commands_list = [
-        ("!register_team <name>", f"Register team ({TOURNAMENT_FEE} currency)"),
-        ("!buy_badge <name>", "Buy badge (Elite, Pro, Legend)"),
-        ("!create_team <name>", "Create matchmaking team"),
-        ("!join_team <name>", "Join a team"),
-        ("!start_match", "Start skill-based match"),
-        ("!vote_winner", "Vote match winner"),
-        ("!match_history [user]", "View match history"),
-        ("!profile [user]", "View user profile"),
-        ("!set_bio <bio>", "Set profile bio"),
-        ("!set_favorite <team/player>", "Set favorite team/player"),
-        ("!leaderboard", "Top 10 players"),
-        ("!balance", "Check currency"),
-        ("!sponsor", "View sponsors"),
-        ("!suggest <feedback>", "Submit feedback"),
-        ("!add_currency <user> <amount>", "Admin: Add currency"),
-        ("!reset_points <user>", "Admin: Reset points"),
-        ("!adjust_points <user> <amount>", "Admin: Adjust points"),
-        ("!ban_from_matchmaking <user>", "Admin: Ban/unban from matchmaking"),
-        ("!dispute <match_id>", "Report match issue"),
-        ("!clear_match", "Admin: Clear active match"),
-        ("!announce <message>", "Admin: Post announcement")
+        ("📋 !register_team <name>", f"Register team ({TOURNAMENT_FEE} currency)"),
+        ("🏅 !buy_badge <name>", "Buy badge (Elite, Pro, Legend)"),
+        ("⚔️ !create_team <name>", "Create matchmaking team"),
+        ("🤝 !join_team <name>", "Join a team"),
+        ("🎯 !start_match", "Start skill-based match"),
+        ("🏆 !vote_winner", "Vote match winner"),
+        ("📜 !match_history [user]", "View match history"),
+        ("👤 !profile [user]", "View user profile"),
+        ("✍️ !set_bio <bio>", "Set profile bio"),
+        ("⭐ !set_favorite <team/player>", "Set favorite team/player"),
+        ("📊 !leaderboard", "Top 10 players"),
+        ("💰 !balance", "Check currency"),
+        ("🙌 !sponsor", "View sponsors"),
+        ("💡 !suggest <feedback>", "Submit feedback"),
+        ("🔧 !add_currency <user> <amount>", "Admin: Add currency"),
+        ("🔄 !reset_points <user>", "Admin: Reset points"),
+        ("📈 !adjust_points <user> <amount>", "Admin: Adjust points"),
+        ("🚫 !ban_from_matchmaking <user>", "Admin: Ban/unban from matchmaking"),
+        ("⚖️ !dispute <match_id>", "Report match issue"),
+        ("🛑 !clear_match", "Admin: Clear active match"),
+        ("📢 !announce <message>", "Admin: Post announcement")
     ]
     for name, value in commands_list:
         embed.add_field(name=name, value=value, inline=False)
