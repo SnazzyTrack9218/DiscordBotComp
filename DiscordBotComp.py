@@ -453,7 +453,7 @@ async def start_match(ctx):
         
         await asyncio.sleep(30)
         chosen_format = max(format_votes, key=format_votes.get, default='5v5')
-        team_size = int(chosen_format[0])
+        team_size = int(chosen_format[0])  # Get team size from format (e.g., 1 for 1v1)
         
         # Announce currency reward
         embed = discord.Embed(
@@ -494,10 +494,16 @@ async def start_match(ctx):
                     active_teams[team_name]['leader'] = voter
         
         # Check team sizes
-        if len(active_teams[team1_name]['members']) < team_size or len(active_teams[team2_name]['members']) < team_size:
+        team1_count = len(active_teams[team1_name]['members'])
+        team2_count = len(active_teams[team2_name]['members'])
+        if team1_count < team_size or team2_count < team_size:
             del active_teams[team1_name]
             del active_teams[team2_name]
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Need {team_size} players per team!", color=discord.Color.red()))
+            return await ctx.send(embed=discord.Embed(
+                title="❌ Error",
+                description=f"Need {team_size} player{'s' if team_size > 1 else ''} per team! Got {team1_count} in Team 1, {team2_count} in Team 2.",
+                color=discord.Color.red()
+            ))
         
         team1_members = active_teams[team1_name]['members'][:team_size]
         team2_members = active_teams[team2_name]['members'][:team_size]
@@ -505,8 +511,8 @@ async def start_match(ctx):
         team2_names = ', '.join(m.name for m in team2_members)
         
         # Update team points
-        active_teams[team1_name]['points'] = sum(get_user(m.id)[1] for m in team1_members) / len(team1_members)
-        active_teams[team2_name]['points'] = sum(get_user(m.id)[1] for m in team2_members) / len(team2_members)
+        active_teams[team1_name]['points'] = sum(get_user(m.id)[1] for m in team1_members) / len(team1_members) if team1_members else 0
+        active_teams[team2_name]['points'] = sum(get_user(m.id)[1] for m in team2_members) / len(team2_members) if team2_members else 0
         
         # Start match
         cursor.execute('INSERT INTO matches (format, team1, team2, status, timestamp) VALUES (?, ?, ?, ?, ?)',
