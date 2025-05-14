@@ -415,7 +415,7 @@ async def join_team(ctx, *, name):
         logger.error(f"Error in !join_team for {ctx.author.name}: {e}")
         await log_error_to_channel(ctx.guild, f"Error in !join_team for {ctx.author.name}: {e}")
         await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to join team.", color=discord.Color.red()))
-        
+
 @bot.command()
 async def start_match(ctx):
     try:
@@ -440,7 +440,25 @@ async def start_match(ctx):
         if team1_name not in active_teams:
             active_teams[team1_name] = {'leader': None, 'members': [], 'points': 0}
         if team2_name not in active_teams:
-            active_teams[team2_name] = {'leader': None, 'members': [], 'points': 0}
+            active_teams[  = {'leader': None, 'members': [], 'points': 0}
+        
+        # Get voice channel members
+        team1_channel = discord.utils.get(ctx.guild.voice_channels, name="Team 1")
+        team2_channel = discord.utils.get(ctx.guild.voice_channels, name="Team 2")
+        team1_members = team1_channel.members if team1_channel else []
+        team2_members = team2_channel.members if team2_channel else []
+        
+        # Add voice channel members to teams
+        for member in team1_members:
+            if member not in active_teams[team1_name]['members']:
+                active_teams[team1_name]['members'].append(member)
+                if not active_teams[team1_name]['leader']:
+                    active_teams[team1_name]['leader'] = member
+        for member in team2_members:
+            if member not in active_teams[team2_name]['members']:
+                active_teams[team2_name]['members'].append(member)
+                if not active_teams[team2_name]['leader']:
+                    active_teams[team2_name]['leader'] = member
         
         # Vote for match format
         format_votes.clear()
@@ -454,60 +472,34 @@ async def start_match(ctx):
             await msg.add_reaction(f"{i+1}️⃣")
         
         await asyncio.sleep(30)
-        chosen_format = max(format_votes, key=format_votes.get, default='5v5')
-        team_size = int(chosen_format[0])  # Get team size from format (e.g., 1 for 1v1)
+        chosen_format = max(format_votes, key=format_votes.get, default='1v1')
+        team_size = int(chosen_format[0])
         
         # Announce currency reward
         embed = discord.Embed(
             title="💰 Match Reward",
-            description=f"Winning team gains 100 currency per player! Vote to join a team.",
+            description=f"Winning team gains 100 currency per player! Join a team using buttons below.",
             color=discord.Color.blue()
         )
         embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Voting ends in 30s")
-        await ctx.send(embed=embed)
+        embed.set_footer(text="Join teams within 30s")
+        view = TeamJoinView(team1_name, team2_name)
+        await ctx.send(embed=embed, view=view)
         
-        # Vote for team
-        votes.clear()
-        embed = discord.Embed(
-            title="🤝 Choose Team",
-            description="React to join or switch teams!",
-            color=discord.Color.purple()
-        )
-        embed.add_field(name="Team 1", value=f"React with 1️⃣ ({len(active_teams[team1_name]['members'])} players)", inline=True)
-        embed.add_field(name="Team 2", value=f"React with 2️⃣ ({len(active_teams[team2_name]['members'])} players)", inline=True)
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Voting ends in 30s")
-        msg = await ctx.send(embed=embed)
-        await msg.add_reaction("1️⃣")
-        await msg.add_reaction("2️⃣")
-        
+        # Wait for button interactions
         await asyncio.sleep(30)
+        view.stop()
         
-        # Update team memberships based on votes
-        for voter_id, team_choice in votes.items():
-            voter = await ctx.guild.fetch_member(voter_id)
-            if not voter:
-                continue
-            new_team = team1_name if team_choice == 'team1' else team2_name
-            # Remove voter from other team if present
-            for team_name in [team1_name, team2_name]:
-                if voter in active_teams[team_name]['members']:
-                    active_teams[team_name]['members'].remove(voter)
-                    if active_teams[team_name]['leader'] == voter and active_teams[team_name]['members']:
-                        active_teams[team_name]['leader'] = active_teams[team_name]['members'][0]
-                    elif active_teams[team_name]['leader'] == voter:
-                        active_teams[team_name]['leader'] = None
-            # Add voter to chosen team
-            if voter not in active_teams[new_team]['members']:
-                active_teams[new_team]['members'].append(voter)
-                if not active_teams[new_team]['leader']:
-                    active_teams[new_team]['leader'] = voter
-        
-        # Check team sizes
+        # Check team sizes for 1v1
         team1_count = len(active_teams[team1_name]['members'])
         team2_count = len(active_teams[team2_name]['members'])
-        if team1_count < team_size or team2_count < team_size:
+        if chosen_format == '1v1' and (team1_count == 0 and team2_count == 0):
+            return await ctx.send(embed=discord.Embed(
+                title="❌ Error",
+                description="Need at least 1 player in either team for 1v1!",
+                color=discord.Color.red()
+            ))
+        elif chosen_format != '1v1' and (team1_count < team_size or team2_count < team_size):
             return await ctx.send(embed=discord.Embed(
                 title="❌ Error",
                 description=f"Need {team_size} player{'s' if team_size > 1 else ''} per team! Got {team1_count} in Team 1, {team2_count} in Team 2.",
@@ -516,8 +508,8 @@ async def start_match(ctx):
         
         team1_members = active_teams[team1_name]['members'][:team_size]
         team2_members = active_teams[team2_name]['members'][:team_size]
-        team1_names = ', '.join(m.name for m in team1_members)
-        team2_names = ', '.join(m.name for m in team2_members)
+        team1_names = ', '.join(m.name for m in team1_members) if team1_members else "None"
+        team2_names = ', '.join(m.name for m in team2_members) if team2_members else "None"
         
         # Update team points
         active_teams[team1_name]['points'] = sum(get_user(m.id)[1] for m in team1_members) / len(team1_members) if team1_members else 0
@@ -548,7 +540,72 @@ async def start_match(ctx):
     except Exception as e:
         logger.error(f"Error in !start_match for {ctx.author.name}: {e}")
         await log_error_to_channel(ctx.guild, f"Error in !start_match for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to start match.", color=discord.Color.red()))        
+        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to start match.", color=discord.Color.red()))
+
+# Add this new class after start_match
+class TeamJoinView(discord.ui.View):
+    def __init__(self, team1_name, team2_name):
+        super().__init__(timeout=30)
+        self.team1_name = team1_name
+        self.team2_name = team2_name
+    
+    @discord.ui.button(label="Join Team 1", style=discord.ButtonStyle.primary, emoji="1️⃣")
+    async def join_team1(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user = interaction.user
+        # Remove from other team
+        for team_name in [self.team1_name, self.team2_name]:
+            if user in active_teams[team_name]['members']:
+                active_teams[team_name]['members'].remove(user)
+                if active_teams[team_name]['leader'] == user and active_teams[team_name]['members']:
+                    active_teams[team_name]['leader'] = active_teams[team_name]['members'][0]
+                elif active_teams[team_name]['leader'] == user:
+                    active_teams[team_name]['leader'] = None
+        # Add to Team 1
+        if user not in active_teams[self.team1_name]['members']:
+            active_teams[self.team1_name]['members'].append(user)
+            if not active_teams[self.team1_name]['leader']:
+                active_teams[self.team1_name]['leader'] = user
+        await interaction.response.send_message(f"{user.mention} joined Team 1!", ephemeral=True)
+    
+    @discord.ui.button(label="Join Team 2", style=discord.ButtonStyle.primary, emoji="2️⃣")
+    async def join_team2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user = interaction.user
+        # Remove from other team
+        for team_name in [self.team1_name, self.team2_name]:
+            if user in active_teams[team_name]['members']:
+                active_teams[team_name]['members'].remove(user)
+                if active_teams[team_name]['leader'] == user and active_teams[team_name]['members']:
+                    active_teams[team_name]['leader'] = active_teams[team_name]['members'][0]
+                elif active_teams[team_name]['leader'] == user:
+                    active_teams[team_name]['leader'] = None
+        # Add to Team 2
+        if user not in active_teams[self.team2_name]['members']:
+            active_teams[self.team2_name]['members'].append(user)
+            if not active_teams[self.team2_name]['leader']:
+                active_teams[self.team2_name]['leader'] = user
+        await interaction.response.send_message(f"{user.mention} joined Team 2!", ephemeral=True)
+
+# Replace on_reaction_add (lines 614-635)
+@bot.event
+async def on_reaction_add(reaction, user):
+    global format_votes
+    if user.bot or not reaction.message.author.bot:
+        return
+    
+    try:
+        embed_title = reaction.message.embeds[0].title if reaction.message.embeds else ""
+        emoji = str(reaction.emoji)
+        
+        if "Vote Match Format" in embed_title:
+            if emoji in [f"{i+1}️⃣" for i in range(len(MATCH_FORMATS))]:
+                fmt_index = int(emoji[0]) - 1
+                if 0 <= fmt_index < len(MATCH_FORMATS):
+                    fmt = MATCH_FORMATS[fmt_index]
+                    format_votes[fmt] = format_votes.get(fmt, 0) + 1
+                    logger.info(f"Format vote: {user.name} voted for {fmt}")
+    except Exception as e:
+        logger.error(f"Error in on_reaction_add for {user.name}: {e}")
+        await log_error_to_channel(reaction.message.guild, f"Error in on_reaction_add for {user.name}: {e}")
 
 @bot.command()
 async def vote_winner(ctx):
