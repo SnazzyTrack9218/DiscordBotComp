@@ -440,7 +440,7 @@ async def start_match(ctx):
         if team1_name not in active_teams:
             active_teams[team1_name] = {'leader': None, 'members': [], 'points': 0}
         if team2_name not in active_teams:
-            active_teams[  = {'leader': None, 'members': [], 'points': 0}
+            active_teams[team2_name] = {'leader': None, 'members': [], 'points': 0}
         
         # Get voice channel members
         team1_channel = discord.utils.get(ctx.guild.voice_channels, name="Team 1")
