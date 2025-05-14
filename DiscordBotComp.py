@@ -415,7 +415,7 @@ async def join_team(ctx, *, name):
         logger.error(f"Error in !join_team for {ctx.author.name}: {e}")
         await log_error_to_channel(ctx.guild, f"Error in !join_team for {ctx.author.name}: {e}")
         await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to join team.", color=discord.Color.red()))
-
+        
 @bot.command()
 async def start_match(ctx):
     try:
@@ -434,14 +434,13 @@ async def start_match(ctx):
         if cooldowns[user_id] > time.time():
             return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Wait {int(cooldowns[user_id] - time.time())} seconds!", color=discord.Color.red()))
         
-        teams = [(name, team) for name, team in active_teams.items() if team['members']]
-        if len(teams) < 2:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="Need 2+ teams!", color=discord.Color.red()))
+        # Initialize teams
+        team1_name = "Team 1"
+        team2_name = "Team 2"
+        active_teams[team1_name] = {'leader': None, 'members': [], 'points': 0}
+        active_teams[team2_name] = {'leader': None, 'members': [], 'points': 0}
         
-        teams.sort(key=lambda x: x[1]['points'])
-        team1_name, team1 = teams[0]
-        team2_name, team2 = teams[-1]
-        
+        # Vote for match format
         format_votes.clear()
         embed = discord.Embed(title="⚔️ Vote Match Format", description="React to choose format!", color=discord.Color.purple())
         for i, fmt in enumerate(MATCH_FORMATS):
@@ -456,14 +455,60 @@ async def start_match(ctx):
         chosen_format = max(format_votes, key=format_votes.get, default='5v5')
         team_size = int(chosen_format[0])
         
-        if len(team1['members']) < team_size or len(team2['members']) < team_size:
+        # Announce currency reward
+        embed = discord.Embed(
+            title="💰 Match Reward",
+            description=f"Winning team gains 100 currency per player! Vote to join a team.",
+            color=discord.Color.blue()
+        )
+        embed.set_thumbnail(url=THUMBNAIL_URL)
+        embed.set_footer(text="Voting ends in 30s")
+        await ctx.send(embed=embed)
+        
+        # Vote for team
+        votes.clear()
+        embed = discord.Embed(
+            title="🤝 Choose Team",
+            description="React to join a team!",
+            color=discord.Color.purple()
+        )
+        embed.add_field(name="Team 1", value="React with 1️⃣", inline=True)
+        embed.add_field(name="Team 2", value="React with 2️⃣", inline=True)
+        embed.set_thumbnail(url=THUMBNAIL_URL)
+        embed.set_footer(text="Voting ends in 30s")
+        msg = await ctx.send(embed=embed)
+        await msg.add_reaction("1️⃣")
+        await msg.add_reaction("2️⃣")
+        
+        await asyncio.sleep(30)
+        
+        # Assign users to teams based on votes
+        for voter_id, team_choice in votes.items():
+            voter = await ctx.guild.fetch_member(voter_id)
+            if not voter:
+                continue
+            team_name = team1_name if team_choice == 'team1' else team2_name
+            if voter not in active_teams[team_name]['members']:
+                active_teams[team_name]['members'].append(voter)
+                if not active_teams[team_name]['leader']:
+                    active_teams[team_name]['leader'] = voter
+        
+        # Check team sizes
+        if len(active_teams[team1_name]['members']) < team_size or len(active_teams[team2_name]['members']) < team_size:
+            del active_teams[team1_name]
+            del active_teams[team2_name]
             return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Need {team_size} players per team!", color=discord.Color.red()))
         
-        team1_members = team1['members'][:team_size]
-        team2_members = team2['members'][:team_size]
+        team1_members = active_teams[team1_name]['members'][:team_size]
+        team2_members = active_teams[team2_name]['members'][:team_size]
         team1_names = ', '.join(m.name for m in team1_members)
         team2_names = ', '.join(m.name for m in team2_members)
         
+        # Update team points
+        active_teams[team1_name]['points'] = sum(get_user(m.id)[1] for m in team1_members) / len(team1_members)
+        active_teams[team2_name]['points'] = sum(get_user(m.id)[1] for m in team2_members) / len(team2_members)
+        
+        # Start match
         cursor.execute('INSERT INTO matches (format, team1, team2, status, timestamp) VALUES (?, ?, ?, ?, ?)',
                       (chosen_format, team1_names, team2_names, 'active', datetime.now().isoformat()))
         conn.commit()
@@ -471,7 +516,7 @@ async def start_match(ctx):
         
         embed = discord.Embed(
             title="⚔️ Match Started",
-            description=f"**Format**: {chosen_format}\n**Team 1**: {team1_names}\n**Team 2**: {team2_names}",
+            description=f"**Format**: {chosen_format}\n**Team 1**: {team1_names}\n**Team 2**: {team2_names}\n**Reward**: 100 currency per winner",
             color=discord.Color.blue()
         )
         embed.set_thumbnail(url=THUMBNAIL_URL)
