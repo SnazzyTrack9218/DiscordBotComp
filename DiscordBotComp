@@ -608,6 +608,7 @@ async def profile(ctx, user: discord.Member = None):
         cursor.execute('SELECT bio, favorite_team FROM profiles WHERE user_id = ?', (target.id,))
         profile = cursor.fetchone() or ('No bio set', 'None')
         badges = ', '.join(r.name for r in target.roles if r.name.startswith('Badge_')) or 'None'
+        team = next((name for name, data in active_teams.items() if target in data['members']), 'None')
         rank = get_rank(user_data[1])
         embed = discord.Embed(title=f"👤 {target.name}'s Profile", color=discord.Color.purple())
         embed.add_field(name="Rank", value=rank, inline=True)
@@ -617,6 +618,7 @@ async def profile(ctx, user: discord.Member = None):
                         value=f"{user_data[3]}/{user_data[4]} | {user_data[3] / (user_data[3] + user_data[4]) * 100:.1f}%" if user_data[3] + user_data[4] > 0 else "No matches", 
                         inline=True)
         embed.add_field(name="Currency", value=user_data[2], inline=True)
+        embed.add_field(name="Team", value=team, inline=True)
         embed.add_field(name="Bio", value=profile[0], inline=False)
         embed.add_field(name="Favorite Team/Player", value=profile[1], inline=False)
         embed.set_thumbnail(url=target.avatar.url if target.avatar else THUMBNAIL_URL)
