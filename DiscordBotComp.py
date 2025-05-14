@@ -434,11 +434,13 @@ async def start_match(ctx):
         if cooldowns[user_id] > time.time():
             return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Wait {int(cooldowns[user_id] - time.time())} seconds!", color=discord.Color.red()))
         
-        # Initialize teams
+        # Ensure teams exist
         team1_name = "Team 1"
         team2_name = "Team 2"
-        active_teams[team1_name] = {'leader': None, 'members': [], 'points': 0}
-        active_teams[team2_name] = {'leader': None, 'members': [], 'points': 0}
+        if team1_name not in active_teams:
+            active_teams[team1_name] = {'leader': None, 'members': [], 'points': 0}
+        if team2_name not in active_teams:
+            active_teams[team2_name] = {'leader': None, 'members': [], 'points': 0}
         
         # Vote for match format
         format_votes.clear()
@@ -469,11 +471,11 @@ async def start_match(ctx):
         votes.clear()
         embed = discord.Embed(
             title="🤝 Choose Team",
-            description="React to join a team!",
+            description="React to join or switch teams!",
             color=discord.Color.purple()
         )
-        embed.add_field(name="Team 1", value="React with 1️⃣", inline=True)
-        embed.add_field(name="Team 2", value="React with 2️⃣", inline=True)
+        embed.add_field(name="Team 1", value=f"React with 1️⃣ ({len(active_teams[team1_name]['members'])} players)", inline=True)
+        embed.add_field(name="Team 2", value=f"React with 2️⃣ ({len(active_teams[team2_name]['members'])} players)", inline=True)
         embed.set_thumbnail(url=THUMBNAIL_URL)
         embed.set_footer(text="Voting ends in 30s")
         msg = await ctx.send(embed=embed)
@@ -482,23 +484,30 @@ async def start_match(ctx):
         
         await asyncio.sleep(30)
         
-        # Assign users to teams based on votes
+        # Update team memberships based on votes
         for voter_id, team_choice in votes.items():
             voter = await ctx.guild.fetch_member(voter_id)
             if not voter:
                 continue
-            team_name = team1_name if team_choice == 'team1' else team2_name
-            if voter not in active_teams[team_name]['members']:
-                active_teams[team_name]['members'].append(voter)
-                if not active_teams[team_name]['leader']:
-                    active_teams[team_name]['leader'] = voter
+            new_team = team1_name if team_choice == 'team1' else team2_name
+            # Remove voter from other team if present
+            for team_name in [team1_name, team2_name]:
+                if voter in active_teams[team_name]['members']:
+                    active_teams[team_name]['members'].remove(voter)
+                    if active_teams[team_name]['leader'] == voter and active_teams[team_name]['members']:
+                        active_teams[team_name]['leader'] = active_teams[team_name]['members'][0]
+                    elif active_teams[team_name]['leader'] == voter:
+                        active_teams[team_name]['leader'] = None
+            # Add voter to chosen team
+            if voter not in active_teams[new_team]['members']:
+                active_teams[new_team]['members'].append(voter)
+                if not active_teams[new_team]['leader']:
+                    active_teams[new_team]['leader'] = voter
         
         # Check team sizes
         team1_count = len(active_teams[team1_name]['members'])
         team2_count = len(active_teams[team2_name]['members'])
         if team1_count < team_size or team2_count < team_size:
-            del active_teams[team1_name]
-            del active_teams[team2_name]
             return await ctx.send(embed=discord.Embed(
                 title="❌ Error",
                 description=f"Need {team_size} player{'s' if team_size > 1 else ''} per team! Got {team1_count} in Team 1, {team2_count} in Team 2.",
@@ -539,7 +548,7 @@ async def start_match(ctx):
     except Exception as e:
         logger.error(f"Error in !start_match for {ctx.author.name}: {e}")
         await log_error_to_channel(ctx.guild, f"Error in !start_match for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to start match.", color=discord.Color.red()))
+        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to start match.", color=discord.Color.red()))        
 
 @bot.command()
 async def vote_winner(ctx):
