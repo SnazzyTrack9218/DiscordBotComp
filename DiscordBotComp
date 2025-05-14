@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from collections import defaultdict
 import time
 import logging
+import os
+import uuid
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,9 +20,22 @@ intents.message_content = True
 intents.members = True
 intents.reactions = True
 bot = commands.Bot(command_prefix='!', intents=intents)
+bot.remove_command('help')  # Remove default help command
 
-# Remove default help command
-bot.remove_command('help')
+# Command restriction
+COMMANDS_CHANNEL = "commands"
+
+@bot.check
+async def restrict_commands_channel(ctx):
+    if ctx.channel.name != COMMANDS_CHANNEL:
+        embed = discord.Embed(
+            title="❌ Wrong Channel",
+            description=f"Commands can only be used in #{COMMANDS_CHANNEL}!",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+        return False
+    return True
 
 # SQLite database setup
 def init_db():
@@ -56,6 +71,10 @@ def init_db():
             bio TEXT,
             favorite_team TEXT
         )''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS sponsors (
+            sponsor_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sponsor_name TEXT
+        )''')
         conn.commit()
         return conn, cursor
     except sqlite3.Error as e:
@@ -68,24 +87,6 @@ conn, cursor = init_db()
 TOURNAMENT_FEE = 500
 BADGE_PRICES = {'Elite': 200, 'Pro': 500, 'Legend': 1000}
 MATCH_FORMATS = ['1v1', '2v2', '3v3', '4v4', '5v5']
-
-# Footer text generator
-def get_footer_text():
-    return "Siege Competitive Hub - Powered by Dynamic Footer"
-import os
-
-def get_sponsor_message():
-    try:
-        cursor.execute('SELECT sponsor_name FROM sponsors')
-        sponsors = cursor.fetchall()
-        if sponsors:
-            return "Thank you to our sponsors: " + ", ".join(s[0] for s in sponsors)
-        return "Thank you to our sponsors: [No sponsors available]"
-    except sqlite3.Error as e:
-        logger.error(f"Error fetching sponsors: {e}")
-        return "Thank you to our sponsors: [Error fetching sponsors]"
-
-# Fetch thumbnail URL from environment variable or use a default value
 THUMBNAIL_URL = os.getenv("THUMBNAIL_URL", "https://www.pngall.com/wp-content/uploads/5/Rainbow-Six-Siege-Logo-PNG-Free-Download.png")
 MATCH_COOLDOWN = 300  # 5 minutes
 current_match = None
@@ -94,54 +95,27 @@ format_votes = {}
 cooldowns = defaultdict(lambda: 0)
 active_teams = {}
 
-@bot.event
-async def on_ready():
-    logger.info(f'Logged in as {bot.user}')
-    save_data.start()
-
-@bot.event
-async def on_member_join(member):
-    try:
-        channel = discord.utils.get(member.guild.text_channels, name='welcome') or member.guild.text_channels[0]
-        if not channel:
-            logger.warning(f"No text channels found in guild {member.guild.id}")
-            return
-        account_age = (datetime.now(timezone.utc) - member.created_at).days
-        embed = discord.Embed(
-            title="🎮 Welcome to Siege Competitive Hub!",
-            description=f"Welcome, {member.mention}! Your account is **{account_age} days** old.\nGet started with `!help` for commands!"
-        )
-        embed.set_footer(text=get_footer_text(), icon_url=bot.user.avatar.url if bot.user.avatar else THUMBNAIL_URL)
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub", icon_url=bot.user.avatar.url if bot.user.avatar else THUMBNAIL_URL)
-        embed.timestamp = datetime.now(timezone.utc)
-        await channel.send(embed=embed)
-        logger.info(f"Sent welcome message to {member.name} in {member.guild.name}")
-    except Exception as e:
-        logger.error(f"Error in on_member_join for {member.name}: {e}")
-
-# Save data every 5 minutes
-@tasks.loop(minutes=5)
-async def save_data():
-    try:
-        conn.commit()
-        logger.debug("Database saved")
-    except sqlite3.Error as e:
-        logger.error(f"Error saving database: {e}")
-
 # Helper functions
+def get_footer_text():
+    return "Siege Competitive Hub - Powered by Dynamic Footer"
+
+def get_sponsor_message():
+    try:
+        cursor.execute('SELECT sponsor_name FROM sponsors')
+        sponsors = cursor.fetchall()
+        return "Thank you to our sponsors: " + (", ".join(s[0] for s in sponsors) if sponsors else "[No sponsors available]")
+    except sqlite3.Error as e:
+        logger.error(f"Error fetching sponsors: {e}")
+        return "Thank you to our sponsors: [Error fetching sponsors]"
+
 def get_user(user_id):
     try:
         cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
         user = cursor.fetchone()
-        if user is None:
-            # Initialize new user
-            update_user(user_id, 0, 1000, 0, 0, 0)
+        if not user:
+            update_user(user_id)
             cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
             user = cursor.fetchone()
-        if user is None:
-            logger.error(f"Failed to create/fetch user {user_id} after update")
-            return None
         return user
     except sqlite3.Error as e:
         logger.error(f"Error fetching user {user_id}: {e}")
@@ -156,16 +130,11 @@ def update_user(user_id, points=0, currency=1000, wins=0, losses=0, banned=0):
         logger.error(f"Error updating user {user_id}: {e}")
 
 def deduct_currency(user_id, amount):
-    try:
-        user = get_user(user_id)
-        if not user or user[2] < amount:
-            return False
-        new_currency = user[2] - amount
-        update_user(user_id, user[1], new_currency, user[3], user[4], user[5])
-        return True
-    except sqlite3.Error as e:
-        logger.error(f"Error deducting currency for user {user_id}: {e}")
+    user = get_user(user_id)
+    if not user or user[2] < amount:
         return False
+    update_user(user_id, user[1], user[2] - amount, user[3], user[4], user[5])
+    return True
 
 def get_rank(points):
     if points > 1000:
@@ -180,718 +149,587 @@ async def assign_rank_role(member, points):
         role_name = f"Rank_{rank}"
         role = discord.utils.get(member.guild.roles, name=role_name)
         if not role:
-            role = await member.guild.create_role(
-                name=role_name,
-                color=discord.Color.gold() if rank == "Gold" else discord.Color.greyple() if rank == "Silver" else discord.Color.dark_orange()
-            )
+            color = discord.Color.gold() if rank == "Gold" else discord.Color.greyple() if rank == "Silver" else discord.Color.dark_orange()
+            role = await member.guild.create_role(name=role_name, color=color)
         for r in member.roles:
             if r.name.startswith("Rank_") and r.name != role_name:
                 await member.remove_roles(r)
         if role not in member.roles:
             await member.add_roles(role)
-        logger.debug(f"Assigned rank {rank} to {member.name}")
     except discord.errors.Forbidden:
         logger.warning(f"Missing permissions to assign role to {member.name}")
     except Exception as e:
         logger.error(f"Error assigning rank to {member.name}: {e}")
 
+# Bot events
+@bot.event
+async def on_ready():
+    logger.info(f'Logged in as {bot.user}')
+    save_data.start()
+
+@bot.event
+async def on_member_join(member):
+    try:
+        channel = discord.utils.get(member.guild.text_channels, name='welcome') or member.guild.text_channels[0]
+        if not channel:
+            return
+        account_age = (datetime.now(timezone.utc) - member.created_at).days
+        embed = discord.Embed(
+            title="🎮 Welcome to Siege Competitive Hub!",
+            description=f"Welcome, {member.mention}! Account age: **{account_age} days**.\nUse `!help` in #{COMMANDS_CHANNEL} for commands!",
+            color=discord.Color.blue()
+        )
+        embed.set_thumbnail(url=THUMBNAIL_URL)
+        embed.set_footer(text=get_footer_text())
+        embed.timestamp = datetime.now(timezone.utc)
+        await channel.send(embed=embed)
+    except Exception as e:
+        logger.error(f"Error in on_member_join for {member.name}: {e}")
+
+@tasks.loop(minutes=5)
+async def save_data():
+    try:
+        conn.commit()
+        logger.debug("Database saved")
+    except sqlite3.Error as e:
+        logger.error(f"Error saving database: {e}")
+
 # Commands
 @bot.command()
 async def help(ctx):
-    try:
-        logger.info(f"Received !help from {ctx.author.name} in {ctx.guild.name}")
-        embed = discord.Embed(
-            title="🎮 Siege Competitive Hub Commands",
-            description="Your hub for Rainbow Six Siege tournaments and matches!",
-            color=discord.Color.purple()
-        )
-        embed.add_field(name="📋 !register_team <team_name>", value=f"Register for tournament ({TOURNAMENT_FEE} currency).", inline=False)
-        embed.add_field(name="🏅 !buy_badge <badge_name>", value="Buy badge (Elite, Pro, Legend).", inline=False)
-        embed.add_field(name="⚔️ !create_team <name>", value="Create a team for matchmaking.", inline=False)
-        embed.add_field(name="🤝 !join_team <name>", value="Join an existing team.", inline=False)
-        embed.add_field(name="🎯 !start_match", value="Start a skill-based match.", inline=False)
-        embed.add_field(name="🏆 !vote_winner", value="Vote for match winner.", inline=False)
-        embed.add_field(name="📜 !match_history [user]", value="View match history.", inline=False)
-        embed.add_field(name="👤 !profile [user]", value="View user profile.", inline=False)
-        embed.add_field(name="✍️ !set_bio <bio>", value="Set profile bio.", inline=False)
-        embed.add_field(name="⭐ !set_favorite <team/player>", value="Set favorite team/player.", inline=False)
-        embed.add_field(name="📊 !leaderboard", value="Show top 10 players.", inline=False)
-        embed.add_field(name="💰 !balance", value="Check currency balance.", inline=False)
-        embed.add_field(name="🤝 !sponsor", value="View sponsors.", inline=False)
-        embed.add_field(name="💡 !suggest <feedback>", value="Submit feedback.", inline=False)
-        embed.add_field(name="🔧 !add_currency <user> <amount>", value="Admin: Add currency.", inline=False)
-        embed.add_field(name="🔄 !reset_points <user>", value="Admin: Reset points.", inline=False)
-        embed.add_field(name="📈 !adjust_points <user> <amount>", value="Admin: Adjust points.", inline=False)
-        embed.add_field(name="🚫 !ban_from_matchmaking <user>", value="Admin: Ban/unban from matchmaking.", inline=False)
-        embed.add_field(name="⚖️ !dispute <match_id>", value="Report match issue.", inline=False)
-        embed.add_field(name="🛑 !clear_match", value="Admin: Clear active match.", inline=False)
-        embed.add_field(name="📢 !announce <message>", value="Admin: Post announcement.", inline=False)
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub", icon_url=bot.user.avatar.url if bot.user.avatar else THUMBNAIL_URL)
-        embed.timestamp = datetime.now(timezone.utc)
-        await ctx.send(embed=embed)
-        logger.info(f"Sent help embed to {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !help for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to display help. Check bot permissions or try again.", color=discord.Color.red()))
+    embed = discord.Embed(
+        title="🎮 Siege Competitive Hub Commands",
+        description="Rainbow Six Siege tournament and match hub!",
+        color=discord.Color.purple()
+    )
+    commands_list = [
+        ("!register_team <name>", f"Register team ({TOURNAMENT_FEE} currency)"),
+        ("!buy_badge <name>", "Buy badge (Elite, Pro, Legend)"),
+        ("!create_team <name>", "Create matchmaking team"),
+        ("!join_team <name>", "Join a team"),
+        ("!start_match", "Start skill-based match"),
+        ("!vote_winner", "Vote match winner"),
+        ("!match_history [user]", "View match history"),
+        ("!profile [user]", "View user profile"),
+        ("!set_bio <bio>", "Set profile bio"),
+        ("!set_favorite <team/player>", "Set favorite team/player"),
+        ("!leaderboard", "Top 10 players"),
+        ("!balance", "Check currency"),
+        ("!sponsor", "View sponsors"),
+        ("!suggest <feedback>", "Submit feedback"),
+        ("!add_currency <user> <amount>", "Admin: Add currency"),
+        ("!reset_points <user>", "Admin: Reset points"),
+        ("!adjust_points <user> <amount>", "Admin: Adjust points"),
+        ("!ban_from_matchmaking <user>", "Admin: Ban/unban from matchmaking"),
+        ("!dispute <match_id>", "Report match issue"),
+        ("!clear_match", "Admin: Clear active match"),
+        ("!announce <message>", "Admin: Post announcement")
+    ]
+    for name, value in commands_list:
+        embed.add_field(name=name, value=value, inline=False)
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    embed.timestamp = datetime.now(timezone.utc)
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def register_team(ctx, *, team_name):
-    try:
-        user_id = ctx.author.id
-        user = get_user(user_id)
-        if not user:
-            update_user(user_id, 0, 1000)
-            user = get_user(user_id)
-            if not user:
-                await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to initialize user data.", color=discord.Color.red()))
-                return
-        
-        cursor.execute('SELECT team_name FROM teams WHERE team_name = ?', (team_name,))
-        if cursor.fetchone():
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Team name taken!", color=discord.Color.red()))
-            return
-        
-        if not deduct_currency(user_id, TOURNAMENT_FEE):
-            await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Need {TOURNAMENT_FEE} currency!", color=discord.Color.red()))
-            return
-        
-        cursor.execute('INSERT INTO teams (team_name, leader_id, registered_at) VALUES (?, ?, ?)',
-                      (team_name, user_id, datetime.now().isoformat()))
-        conn.commit()
-        embed = discord.Embed(title="✅ Team Registered", description=f"'{team_name}' registered! Fee: {TOURNAMENT_FEE}.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        logger.info(f"Registered team {team_name} for {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !register_team for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to register team.", color=discord.Color.red()))
+    user_id = ctx.author.id
+    user = get_user(user_id)
+    if not user:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+    
+    cursor.execute('SELECT team_name FROM teams WHERE team_name = ?', (team_name,))
+    if cursor.fetchone():
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="Team name taken!", color=discord.Color.red()))
+    
+    if not deduct_currency(user_id, TOURNAMENT_FEE):
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Need {TOURNAMENT_FEE} currency!", color=discord.Color.red()))
+    
+    cursor.execute('INSERT INTO teams (team_name, leader_id, registered_at) VALUES (?, ?, ?)',
+                  (team_name, user_id, datetime.now().isoformat()))
+    conn.commit()
+    embed = discord.Embed(title="✅ Team Registered", description=f"'{team_name}' registered! Fee: {TOURNAMENT_FEE}.", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def buy_badge(ctx, badge_name: str):
-    try:
-        badge_name = badge_name.capitalize()
-        if badge_name not in BADGE_PRICES:
-            await ctx.send(embed=discord.Embed(title="❌ Invalid Badge", description=f"Badge '{badge_name}' is not available.", color=discord.Color.red()))
-            return
-        
-        user_id = ctx.author.id
-        user = get_user(user_id)
-        if not user:
-            update_user(user_id, 0, 1000)
-            user = get_user(user_id)
-            if not user:
-                await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to initialize user data.", color=discord.Color.red()))
-                return
-        
-        if f"Badge_{badge_name}" in [r.name for r in ctx.author.roles]:
-            await ctx.send(embed=discord.Embed(title="❌ Already Owned", description=f"You have {badge_name} badge!", color=discord.Color.red()))
-            return
-        
-        price = BADGE_PRICES[badge_name]
-        if not deduct_currency(user_id, price):
-            await ctx.send(embed=discord.Embed(title="❌ Insufficient Funds", description=f"Need {price} for {badge_name}!", color=discord.Color.red()))
-            return
-        
-        role = discord.utils.get(ctx.guild.roles, name=f"Badge_{badge_name}")
-        if not role:
-            role = await ctx.guild.create_role(name=f"Badge_{badge_name}", color=discord.Color.gold())
-        
-        await ctx.author.add_roles(role)
-        embed = discord.Embed(title="🏅 Badge Purchased", description=f"Purchased {badge_name} for {price} currency!", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        logger.info(f"{ctx.author.name} purchased badge {badge_name}")
-    except discord.errors.Forbidden:
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Bot lacks permission to manage roles!", color=discord.Color.red()))
-    except Exception as e:
-        logger.error(f"Error in !buy_badge for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to purchase badge.", color=discord.Color.red()))
+    badge_name = badge_name.capitalize()
+    if badge_name not in BADGE_PRICES:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Badge '{badge_name}' invalid.", color=discord.Color.red()))
+    
+    user_id = ctx.author.id
+    user = get_user(user_id)
+    if not user:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+    
+    if f"Badge_{badge_name}" in [r.name for r in ctx.author.roles]:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"You have {badge_name} badge!", color=discord.Color.red()))
+    
+    price = BADGE_PRICES[badge_name]
+    if not deduct_currency(user_id, price):
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Need {price} currency!", color=discord.Color.red()))
+    
+    role = discord.utils.get(ctx.guild.roles, name=f"Badge_{badge_name}")
+    if not role:
+        role = await ctx.guild.create_role(name=f"Badge_{badge_name}", color=discord.Color.gold())
+    
+    await ctx.author.add_roles(role)
+    embed = discord.Embed(title="🏅 Badge Purchased", description=f"Purchased {badge_name} for {price} currency!", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def create_team(ctx, *, name):
-    try:
-        user_id = ctx.author.id
-        user = get_user(user_id)
-        if not user:
-            update_user(user_id, 0, 1000)
-            user = get_user(user_id)
-            if not user:
-                await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to initialize user data.", color=discord.Color.red()))
-                return
-        
-        if user[5]:
-            await ctx.send(embed=discord.Embed(title="❌ Banned", description="You are banned from matchmaking!", color=discord.Color.red()))
-            return
-        
-        if name in active_teams:
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Team name taken!", color=discord.Color.red()))
-            return
-        
-        active_teams[name] = {'leader': ctx.author, 'members': [ctx.author], 'points': user[1]}
-        embed = discord.Embed(title="⚔️ Team Created", description=f"Team '{name}' created! Use `!join_team {name}` to join.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        logger.info(f"{ctx.author.name} created team {name}")
-    except Exception as e:
-        logger.error(f"Error in !create_team for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to create team.", color=discord.Color.red()))
+    user_id = ctx.author.id
+    user = get_user(user_id)
+    if not user:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+    
+    if user[5]:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="You are banned!", color=discord.Color.red()))
+    
+    if name in active_teams:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="Team name taken!", color=discord.Color.red()))
+    
+    active_teams[name] = {'leader': ctx.author, 'members': [ctx.author], 'points': user[1]}
+    embed = discord.Embed(title="⚔️ Team Created", description=f"Team '{name}' created! Use `!join_team {name}`.", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def join_team(ctx, *, name):
-    try:
-        user_id = ctx.author.id
-        user = get_user(user_id)
-        if not user:
-            update_user(user_id, 0, 1000)
-            user = get_user(user_id)
-            if not user:
-                await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to initialize user data.", color=discord.Color.red()))
-                return
-        
-        if user[5]:
-            await ctx.send(embed=discord.Embed(title="❌ Banned", description="You are banned from matchmaking!", color=discord.Color.red()))
-            return
-        
-        if name not in active_teams:
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Team not found!", color=discord.Color.red()))
-            return
-        
-        if ctx.author in active_teams[name]['members']:
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Already in team!", color=discord.Color.red()))
-            return
-        
-        active_teams[name]['members'].append(ctx.author)
-        active_teams[name]['points'] = sum(get_user(m.id)[1] for m in active_teams[name]['members']) / len(active_teams[name]['members'])
-        embed = discord.Embed(title="🤝 Joined Team", description=f"You joined '{name}'!", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        logger.info(f"{ctx.author.name} joined team {name}")
-    except Exception as e:
-        logger.error(f"Error in !join_team for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to join team.", color=discord.Color.red()))
+    user_id = ctx.author.id
+    user = get_user(user_id)
+    if not user:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+    
+    if user[5]:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="You are banned!", color=discord.Color.red()))
+    
+    if name not in active_teams:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="Team not found!", color=discord.Color.red()))
+    
+    if ctx.author in active_teams[name]['members']:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="Already in team!", color=discord.Color.red()))
+    
+    active_teams[name]['members'].append(ctx.author)
+    active_teams[name]['points'] = sum(get_user(m.id)[1] for m in active_teams[name]['members']) / len(active_teams[name]['members'])
+    embed = discord.Embed(title="🤝 Joined Team", description=f"You joined '{name}'!", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def start_match(ctx):
     global current_match, votes, format_votes
-    try:
-        if current_match:
-            await ctx.send(embed=discord.Embed(title="❌ Match In Progress", description="A match is active!", color=discord.Color.red()))
-            return
-
-        user_id = ctx.author.id
-        user = get_user(user_id)
-        if not user:
-            update_user(user_id, 0, 1000)
-            user = get_user(user_id)
-            if not user:
-                await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to initialize user data.", color=discord.Color.red()))
-                return
-        
-        if user[5]:
-            await ctx.send(embed=discord.Embed(title="❌ Banned", description="You are banned from matchmaking!", color=discord.Color.red()))
-            return
-        
-        if cooldowns[user_id] > time.time():
-            await ctx.send(embed=discord.Embed(title="❌ Cooldown", description=f"Wait {int(cooldowns[user_id] - time.time())} seconds!", color=discord.Color.red()))
-            return
-
-        # Skill-based matchmaking
-        teams = [(name, team) for name, team in active_teams.items() if len(team['members']) > 0]
-        if len(teams) < 2:
-            await ctx.send(embed=discord.Embed(title="❌ Not Enough Teams", description="Need at least 2 teams!", color=discord.Color.red()))
-            return
-        
-        teams.sort(key=lambda x: x[1]['points'])
-        team1_name, team1 = teams[0]
-        team2_name, team2 = teams[-1] if len(teams) > 1 else teams[0]
-        
-        # Vote for format
-        format_votes.clear()
-        embed = discord.Embed(title="⚔️ Vote for Match Format", description="React to choose format!", color=discord.Color.purple())
-        for i, fmt in enumerate(MATCH_FORMATS):
-            embed.add_field(name=f"**{fmt}**", value=f"React with {i+1}️⃣", inline=True)
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Voting ends in 30 seconds")
-        msg = await ctx.send(embed=embed)
-        for i in range(len(MATCH_FORMATS)):
-            await msg.add_reaction(f"{i+1}️⃣")
-        
-        await asyncio.sleep(30)
-        max_votes = 0
-        chosen_format = '5v5'
-        for fmt in format_votes:
-            if format_votes[fmt] > max_votes:
-                max_votes = format_votes[fmt]
-                chosen_format = fmt
-        
-        team_size = int(chosen_format[0])
-        if len(team1['members']) < team_size or len(team2['members']) < team_size:
-            await ctx.send(embed=discord.Embed(title="❌ Not Enough Players", description=f"Each team needs {team_size} players!", color=discord.Color.red()))
-            return
-        
-        team1_members = team1['members'][:team_size]
-        team2_members = team2['members'][:team_size]
-        team1_names = ', '.join(m.name for m in team1_members)
-        team2_names = ', '.join(m.name for m in team2_members)
-        
-        cursor.execute('INSERT INTO matches (format, team1, team2, status, timestamp) VALUES (?, ?, ?, ?, ?)',
-                      (chosen_format, team1_names, team2_names, 'active', datetime.now().isoformat()))
-        conn.commit()
-        current_match = cursor.lastrowid
-        
-        # Auto-DM players
-        for member in team1_members + team2_members:
-            embed = discord.Embed(title="⚔️ Match Started", description=f"**Format**: {chosen_format}\n**Team 1**: {team1_names}\n**Team 2**: {team2_names}", color=discord.Color.blue())
-            embed.set_thumbnail(url=THUMBNAIL_URL)
-            embed.set_footer(text="Siege Competitive Hub")
-            try:
-                await member.send(embed=embed)
-            except Exception:
-                logger.warning(f"Failed to DM {member.name}")
-
-        await ctx.send(embed=embed)
-        
-        # Set cooldowns
-        for member in team1_members + team2_members:
-            cooldowns[member.id] = time.time() + MATCH_COOLDOWN
-        logger.info(f"Started match #{current_match} with teams {team1_name} vs {team2_name}")
-    except Exception as e:
-        logger.error(f"Error in !start_match for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to start match.", color=discord.Color.red()))
+    if current_match:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="Match in progress!", color=discord.Color.red()))
+    
+    user_id = ctx.author.id
+    user = get_user(user_id)
+    if not user:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+    
+    if user[5]:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="You are banned!", color=discord.Color.red()))
+    
+    if cooldowns[user_id] > time.time():
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Wait {int(cooldowns[user_id] - time.time())} seconds!", color=discord.Color.red()))
+    
+    teams = [(name, team) for name, team in active_teams.items() if team['members']]
+    if len(teams) < 2:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="Need 2+ teams!", color=discord.Color.red()))
+    
+    teams.sort(key=lambda x: x[1]['points'])
+    team1_name, team1 = teams[0]
+    team2_name, team2 = teams[-1]
+    
+    format_votes.clear()
+    embed = discord.Embed(title="⚔️ Vote Match Format", description="React to choose format!", color=discord.Color.purple())
+    for i, fmt in enumerate(MATCH_FORMATS):
+        embed.add_field(name=f"**{fmt}**", value=f"React with {i+1}️⃣", inline=True)
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text="Voting ends in 30s")
+    msg = await ctx.send(embed=embed)
+    for i in range(len(MATCH_FORMATS)):
+        await msg.add_reaction(f"{i+1}️⃣")
+    
+    await asyncio.sleep(30)
+    chosen_format = max(format_votes, key=format_votes.get, default='5v5')
+    team_size = int(chosen_format[0])
+    
+    if len(team1['members']) < team_size or len(team2['members']) < team_size:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Need {team_size} players per team!", color=discord.Color.red()))
+    
+    team1_members = team1['members'][:team_size]
+    team2_members = team2['members'][:team_size]
+    team1_names = ', '.join(m.name for m in team1_members)
+    team2_names = ', '.join(m.name for m in team2_members)
+    
+    cursor.execute('INSERT INTO matches (format, team1, team2, status, timestamp) VALUES (?, ?, ?, ?, ?)',
+                  (chosen_format, team1_names, team2_names, 'active', datetime.now().isoformat()))
+    conn.commit()
+    current_match = cursor.lastrowid
+    
+    embed = discord.Embed(
+        title="⚔️ Match Started",
+        description=f"**Format**: {chosen_format}\n**Team 1**: {team1_names}\n**Team 2**: {team2_names}",
+        color=discord.Color.blue()
+    )
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    for member in team1_members + team2_members:
+        try:
+            await member.send(embed=embed)
+        except:
+            logger.warning(f"Failed to DM {member.name}")
+    await ctx.send(embed=embed)
+    
+    for member in team1_members + team2_members:
+        cooldowns[member.id] = time.time() + MATCH_COOLDOWN
 
 @bot.command()
 async def vote_winner(ctx):
     global current_match, votes
-    try:
-        if not current_match:
-            await ctx.send(embed=discord.Embed(title="❌ No Active Match", description="No match active!", color=discord.Color.red()))
-            return
-        
-        cursor.execute('SELECT team1, team2, format FROM matches WHERE match_id = ?', (current_match,))
-        match = cursor.fetchone()
-        if not match:
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Match not found!", color=discord.Color.red()))
-            return
-        team1, team2, match_format = match[0], match[1], match[2]
-        
-        votes.clear()
-        embed = discord.Embed(title="🏆 Vote for Winner", description="React to choose winner!", color=discord.Color.purple())
-        embed.add_field(name="**Team 1**", value=team1, inline=True)
-        embed.add_field(name="**Team 2**", value=team2, inline=True)
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Voting ends in 30 seconds")
-        msg = await ctx.send(embed=embed)
-        await msg.add_reaction("1️⃣")
-        await msg.add_reaction("2️⃣")
-        
-        await asyncio.sleep(30)
-        team1_votes = votes.get('team1', 0)
-        team2_votes = votes.get('team2', 0)
-        
-        if team1_votes == team2_votes:
-            await ctx.send(embed=discord.Embed(title="🤝 Tie", description="No points awarded!", color=discord.Color.orange()))
-            cursor.execute('UPDATE matches SET status = ?, winner = ?, points = ? WHERE match_id = ?', ('completed', 'Tie', 0, current_match))
-            conn.commit()
-            # Clear only match teams
-            for team in [t for t, data in active_teams.items() if any(m.name in team1 + team2 for m in data['members'])]:
-                del active_teams[team]
-            current_match = None
-            logger.info(f"Match #{current_match} ended in a tie")
-            return
-        
-        winner = 'Team 1' if team1_votes > team2_votes else 'Team 2'
-        points = 100 if match_format == '5v5' else 50
-        
-        # Update stats
-        winner_team = team1 if winner == 'Team 1' else team2
-        loser_team = team2 if winner == 'Team 1' else team1
-        for member in ctx.channel.members:
-            if member.name in winner_team:
-                user = get_user(member.id)
-                if user:
-                    update_user(member.id, user[1] + points, user[2], user[3] + 1, user[4], user[5])
-                    await assign_rank_role(member, user[1] + points)
-            elif member.name in loser_team:
-                user = get_user(member.id)
-                if user:
-                    update_user(member.id, user[1], user[2], user[3], user[4] + 1, user[5])
-        
-        cursor.execute('UPDATE matches SET status = ?, winner = ?, points = ? WHERE match_id = ?', ('completed', winner, points, current_match))
+    if not current_match:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="No active match!", color=discord.Color.red()))
+    
+    cursor.execute('SELECT team1, team2, format FROM matches WHERE match_id = ?', (current_match,))
+    match = cursor.fetchone()
+    if not match:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="Match not found!", color=discord.Color.red()))
+    team1, team2, match_format = match
+    
+    votes.clear()
+    embed = discord.Embed(title="🏆 Vote Winner", description="React to choose winner!", color=discord.Color.purple())
+    embed.add_field(name="**Team 1**", value=team1, inline=True)
+    embed.add_field(name="**Team 2**", value=team2, inline=True)
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text="Voting ends in 30s")
+    msg = await ctx.send(embed=embed)
+    await msg.add_reaction("1️⃣")
+    await msg.add_reaction("2️⃣")
+    
+    await asyncio.sleep(30)
+    team1_votes = votes.get('team1', 0)
+    team2_votes = votes.get('team2', 0)
+    
+    if team1_votes == team2_votes:
+        cursor.execute('UPDATE matches SET status = ?, winner = ?, points = ? WHERE match_id = ?', ('completed', 'Tie', 0, current_match))
         conn.commit()
-        
-        # Log match
-        log_channel = discord.utils.get(ctx.guild.text_channels, name='match-logs') or ctx.channel
-        embed = discord.Embed(title="📜 Match Log", description=f"Match #{current_match}\n**Format**: {match_format}\n**Team 1**: {team1}\n**Team 2**: {team2}\n**Winner**: {winner}\n**Points**: {points}", color=discord.Color.blue())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await log_channel.send(embed=embed)
-        
-        embed = discord.Embed(title="🏆 Match Result", description=f"**{winner}** wins! Awarded {points} points.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        
-        # Clear only match teams
         for team in [t for t, data in active_teams.items() if any(m.name in team1 + team2 for m in data['members'])]:
             del active_teams[team]
         current_match = None
-        logger.info(f"Match #{current_match} won by {winner}")
-    except Exception as e:
-        logger.error(f"Error in !vote_winner for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to process winner vote.", color=discord.Color.red()))
+        return await ctx.send(embed=discord.Embed(title="🤝 Tie", description="No points awarded!", color=discord.Color.orange()))
+    
+    winner = 'Team 1' if team1_votes > team2_votes else 'Team 2'
+    points = 100 if match_format == '5v5' else 50
+    winner_team = team1 if winner == 'Team 1' else team2
+    loser_team = team2 if winner == 'Team 1' else team1
+    
+    for member in ctx.channel.members:
+        if member.name in winner_team:
+            user = get_user(member.id)
+            if user:
+                update_user(member.id, user[1] + points, user[2], user[3] + 1, user[4], user[5])
+                await assign_rank_role(member, user[1] + points)
+        elif member.name in loser_team:
+            user = get_user(member.id)
+            if user:
+                update_user(member.id, user[1], user[2], user[3], user[4] + 1, user[5])
+    
+    cursor.execute('UPDATE matches SET status = ?, winner = ?, points = ? WHERE match_id = ?', ('completed', winner, points, current_match))
+    conn.commit()
+    
+    log_channel = discord.utils.get(ctx.guild.text_channels, name='match-logs') or ctx.channel
+    embed = discord.Embed(
+        title="📜 Match Log",
+        description=f"Match #{current_match}\n**Format**: {match_format}\n**Team 1**: {team1}\n**Team 2**: {team2}\n**Winner**: {winner}\n**Points**: {points}",
+        color=discord.Color.blue()
+    )
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await log_channel.send(embed=embed)
+    
+    embed = discord.Embed(title="🏆 Match Result", description=f"**{winner}** wins! Awarded {points} points.", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
+    
+    for team in [t for t, data in active_teams.items() if any(m.name in team1 + team2 for m in data['members'])]:
+        del active_teams[team]
+    current_match = None
 
 @bot.command()
 async def match_history(ctx, user: discord.Member = None):
-    try:
-        user_id = user.id if user else None
-        if user_id:
-            cursor.execute('SELECT match_id, format, team1, team2, winner, points, timestamp FROM matches WHERE status = ? AND (team1 LIKE ? OR team2 LIKE ?)',
-                          ('completed', f'%{user.name}%', f'%{user.name}%'))
-        else:
-            cursor.execute('SELECT match_id, format, team1, team2, winner, points, timestamp FROM matches WHERE status = ?', ('completed',))
-        
-        matches = cursor.fetchall()
-        embed = discord.Embed(title="📜 Match History", description=f"{'User' if user else 'Global'} match history", color=discord.Color.purple())
-        if not matches:
-            embed.add_field(name="Empty", value="No matches found!", inline=False)
-        for match in matches[:10]:
-            embed.add_field(
-                name=f"Match #{match[0]} ({match[6][:10]})",
-                value=f"**Format**: {match[1]}\n**Team 1**: {match[2]}\n**Team 2**: {match[3]}\n**Winner**: {match[4]}\n**Points**: {match[5]}",
-                inline=False
-            )
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub", icon_url=bot.user.avatar.url if bot.user.avatar else THUMBNAIL_URL)
-        embed.timestamp = datetime.now(timezone.utc)
-        await ctx.send(embed=embed)
-        logger.info(f"Sent match history to {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !match_history for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to fetch match history.", color=discord.Color.red()))
+    user_id = user.id if user else None
+    query = 'SELECT match_id, format, team1, team2, winner, points, timestamp FROM matches WHERE status = ?'
+    params = ['completed']
+    if user_id:
+        query += ' AND (team1 LIKE ? OR team2 LIKE ?)'
+        params.extend([f'%{user.name}%', f'%{user.name}%'])
+    
+    cursor.execute(query, params)
+    matches = cursor.fetchall()
+    embed = discord.Embed(title="📜 Match History", description=f"{'User' if user else 'Global'} history", color=discord.Color.purple())
+    if not matches:
+        embed.add_field(name="Empty", value="No matches found!", inline=False)
+    for match in matches[:10]:
+        embed.add_field(
+            name=f"Match #{match[0]} ({match[6][:10]})",
+            value=f"**Format**: {match[1]}\n**Team 1**: {match[2]}\n**Team 2**: {match[3]}\n**Winner**: {match[4]}\n**Points**: {match[5]}",
+            inline=False
+        )
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    embed.timestamp = datetime.now(timezone.utc)
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def profile(ctx, user: discord.Member = None):
-    try:
-        target = user or ctx.author
-        user_data = get_user(target.id)
-        if not user_data:
-            logger.error(f"Failed to fetch user data for {target.name} ({target.id})")
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Unable to load user data. Try again later.", color=discord.Color.red()))
-            return
-        
-        cursor.execute('SELECT bio, favorite_team FROM profiles WHERE user_id = ?', (target.id,))
-        profile = cursor.fetchone() or ('No bio set', 'None')
-        
-        badges = ', '.join(r.name for r in target.roles if r.name.startswith('Badge_')) or 'None'
-        rank = get_rank(user_data[1])
-        embed = discord.Embed(title=f"👤 {target.name}'s Profile", color=discord.Color.purple())
-        embed.add_field(name="Rank", value=rank, inline=True)
-        embed.add_field(name="Points", value=user_data[1], inline=True)
-        embed.add_field(name="Badges", value=badges, inline=True)
-        embed.add_field(name="Wins/Losses | W/L Ratio", value=f"{user_data[3]}/{user_data[4]} | {user_data[3] / (user_data[3] + user_data[4]) * 100:.1f}%" if user_data[3] + user_data[4] > 0 else "No matches", inline=True)
-        embed.add_field(name="Currency", value=f"{user_data[2]}", inline=True)
-        embed.add_field(name="Bio", value=profile[0], inline=False)
-        embed.add_field(name="Favorite Team/Player", value=profile[1], inline=False)
-        embed.set_thumbnail(url=target.avatar.url if target.avatar else THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        embed.timestamp = datetime.now(timezone.utc)
-        await ctx.send(embed=embed)
-        logger.info(f"Sent profile for {target.name} to {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !profile for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to display profile.", color=discord.Color.red()))
+    target = user or ctx.author
+    user_data = get_user(target.id)
+    if not user_data:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+    
+    cursor.execute('SELECT bio, favorite_team FROM profiles WHERE user_id = ?', (target.id,))
+    profile = cursor.fetchone() or ('No bio set', 'None')
+    badges = ', '.join(r.name for r in target.roles if r.name.startswith('Badge_')) or 'None'
+    rank = get_rank(user_data[1])
+    embed = discord.Embed(title=f"👤 {target.name}'s Profile", color=discord.Color.purple())
+    embed.add_field(name="Rank", value=rank, inline=True)
+    embed.add_field(name="Points", value=user_data[1], inline=True)
+    embed.add_field(name="Badges", value=badges, inline=True)
+    embed.add_field(name="Wins/Losses | W/L Ratio", 
+                    value=f"{user_data[3]}/{user_data[4]} | {user_data[3] / (user_data[3] + user_data[4]) * 100:.1f}%" if user_data[3] + user_data[4] > 0 else "No matches", 
+                    inline=True)
+    embed.add_field(name="Currency", value=user_data[2], inline=True)
+    embed.add_field(name="Bio", value=profile[0], inline=False)
+    embed.add_field(name="Favorite Team/Player", value=profile[1], inline=False)
+    embed.set_thumbnail(url=target.avatar.url if target.avatar else THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    embed.timestamp = datetime.now(timezone.utc)
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def set_bio(ctx, *, bio):
-    try:
-        if len(bio) > 200:
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Bio must be under 200 characters!", color=discord.Color.red()))
-            return
-        cursor.execute('INSERT OR REPLACE INTO profiles (user_id, bio, favorite_team) VALUES (?, ?, (SELECT favorite_team FROM profiles WHERE user_id = ?))',
-                      (ctx.author.id, bio, ctx.author.id))
-        conn.commit()
-        embed = discord.Embed(title="✍️ Bio Updated", description=f"Bio set to: {bio}", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        logger.info(f"{ctx.author.name} updated bio")
-    except Exception as e:
-        logger.error(f"Error in !set_bio for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to set bio.", color=discord.Color.red()))
+    if len(bio) > 200:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="Bio too long (<200 chars)!", color=discord.Color.red()))
+    
+    cursor.execute('INSERT OR REPLACE INTO profiles (user_id, bio, favorite_team) VALUES (?, ?, (SELECT favorite_team FROM profiles WHERE user_id = ?))',
+                  (ctx.author.id, bio, ctx.author.id))
+    conn.commit()
+    embed = discord.Embed(title="✍️ Bio Updated", description=f"Bio set to: {bio}", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def set_favorite(ctx, *, favorite):
-    try:
-        if len(favorite) > 50:
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Favorite must be under 50 characters!", color=discord.Color.red()))
-            return
-        # Fetch current bio if exists
-        cursor.execute('SELECT bio FROM profiles WHERE user_id = ?', (ctx.author.id,))
-        row = cursor.fetchone()
-        bio = row[0] if row and row[0] else 'No bio set'
-        cursor.execute('INSERT OR REPLACE INTO profiles (user_id, bio, favorite_team) VALUES (?, ?, ?)',
-                      (ctx.author.id, bio, favorite))
-        conn.commit()
-        embed = discord.Embed(title="⭐ Favorite Updated", description=f"Favorite set to: {favorite}", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        logger.info(f"{ctx.author.name} updated favorite")
-    except Exception as e:
-        logger.error(f"Error in !set_favorite for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to set favorite.", color=discord.Color.red()))
+    if len(favorite) > 50:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="Favorite too long (<50 chars)!", color=discord.Color.red()))
+    
+    cursor.execute('SELECT bio FROM profiles WHERE user_id = ?', (ctx.author.id,))
+    bio = cursor.fetchone()[0] if cursor.fetchone() else 'No bio set'
+    cursor.execute('INSERT OR REPLACE INTO profiles (user_id, bio, favorite_team) VALUES (?, ?, ?)',
+                  (ctx.author.id, bio, favorite))
+    conn.commit()
+    embed = discord.Embed(title="⭐ Favorite Updated", description=f"Favorite set to: {favorite}", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def leaderboard(ctx):
-    try:
-        cursor.execute('SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10')
-        leaders = cursor.fetchall()
-        embed = discord.Embed(title="📊 Leaderboard", description="Top players by points!", color=discord.Color.purple())
-        if not leaders:
-            embed.add_field(name="Empty", value="No players yet!", inline=False)
-        for i, (user_id, points) in enumerate(leaders, 1):
-            user = await bot.fetch_user(user_id)
-            embed.add_field(name=f"**{i}. {user.name}**", value=f"{points} points ({get_rank(points)})", inline=False)
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub", icon_url=bot.user.avatar.url if bot.user.avatar else THUMBNAIL_URL)
-        embed.timestamp = datetime.now(timezone.utc)
-        await ctx.send(embed=embed)
-        logger.info(f"Sent leaderboard to {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !leaderboard for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to display leaderboard.", color=discord.Color.red()))
+    cursor.execute('SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10')
+    leaders = cursor.fetchall()
+    embed = discord.Embed(title="📊 Leaderboard", description="Top players by points!", color=discord.Color.purple())
+    if not leaders:
+        embed.add_field(name="Empty", value="No players yet!", inline=False)
+    for i, (user_id, points) in enumerate(leaders, 1):
+        user = await bot.fetch_user(user_id)
+        embed.add_field(name=f"**{i}. {user.name}**", value=f"{points} points ({get_rank(points)})", inline=False)
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    embed.timestamp = datetime.now(timezone.utc)
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def balance(ctx):
-    try:
-        user = get_user(ctx.author.id)
-        if not user:
-            logger.error(f"Failed to fetch user data for {ctx.author.name} ({ctx.author.id})")
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Unable to load user data. Try again later.", color=discord.Color.red()))
-            return
-        embed = discord.Embed(title="💰 Balance", description=f"Your balance: **{user[2]}** currency", color=discord.Color.gold())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        logger.info(f"Sent balance to {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !balance for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to check balance.", color=discord.Color.red()))
+    user = get_user(ctx.author.id)
+    if not user:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+    
+    embed = discord.Embed(title="💰 Balance", description=f"Balance: **{user[2]}** currency", color=discord.Color.gold())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
-# Command to display the sponsor message in an embed.
 @bot.command()
 async def sponsor(ctx):
-    try:
-        embed = discord.Embed(title="🤝 Sponsors", description=get_sponsor_message(), color=discord.Color.purple())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        await ctx.send(embed=embed)
-        logger.info(f"Sent sponsor message to {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !sponsor for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to display sponsors.", color=discord.Color.red()))
+    embed = discord.Embed(title="🤝 Sponsors", description=get_sponsor_message(), color=discord.Color.purple())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def suggest(ctx, *, feedback):
-    try:
-        channel = discord.utils.get(ctx.guild.text_channels, name='suggestions') or ctx.channel
-        embed = discord.Embed(title="💡 Suggestion", description=f"From {ctx.author.mention}: {feedback}", color=discord.Color.blue())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await channel.send(embed=embed)
-        await ctx.send(embed=discord.Embed(title="✅ Submitted", description="Your suggestion was sent!", color=discord.Color.green()))
-        logger.info(f"{ctx.author.name} submitted suggestion")
-    except Exception as e:
-        logger.error(f"Error in !suggest for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to submit suggestion.", color=discord.Color.red()))
+    channel = discord.utils.get(ctx.guild.text_channels, name='suggestions') or ctx.channel
+    embed = discord.Embed(title="💡 Suggestion", description=f"From {ctx.author.mention}: {feedback}", color=discord.Color.blue())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await channel.send(embed=embed)
+    await ctx.send(embed=discord.Embed(title="✅ Submitted", description="Suggestion sent!", color=discord.Color.green()))
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def add_currency(ctx, user: discord.Member, amount: int):
-    try:
-        if amount <= 0:
-            await ctx.send(embed=discord.Embed(title="❌ Invalid Amount", description="Amount must be positive!", color=discord.Color.red()))
-            return
-        user_data = get_user(user.id)
-        if not user_data:
-            logger.error(f"Failed to fetch user data for {user.name} ({user.id})")
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Unable to load user data. Try again later.", color=discord.Color.red()))
-            return
-        update_user(user.id, user_data[1], user_data[2] + amount, user_data[3], user_data[4], user_data[5])
-        embed = discord.Embed(title="💰 Currency Added", description=f"Added {amount} currency to {user.name}.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        logger.info(f"Added {amount} currency to {user.name} by {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !add_currency for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to add currency.", color=discord.Color.red()))
+    if amount <= 0:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="Amount must be positive!", color=discord.Color.red()))
+    
+    user_data = get_user(user.id)
+    if not user_data:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+    
+    update_user(user.id, user_data[1], user_data[2] + amount, user_data[3], user_data[4], user_data[5])
+    embed = discord.Embed(title="💰 Currency Added", description=f"Added {amount} currency to {user.name}.", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def reset_points(ctx, user: discord.Member):
-    try:
-        user_data = get_user(user.id)
-        if not user_data:
-            logger.error(f"Failed to fetch user data for {user.name} ({user.id})")
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Unable to load user data. Try again later.", color=discord.Color.red()))
-            return
-        update_user(user.id, 0, user_data[2], user_data[3], user_data[4], user_data[5])
-        await assign_rank_role(user, 0)
-        embed = discord.Embed(title="🔄 Points Reset", description=f"Reset points for {user.name}.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        logger.info(f"Reset points for {user.name} by {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !reset_points for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to reset points.", color=discord.Color.red()))
+    user_data = get_user(user.id)
+    if not user_data:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+    
+    update_user(user.id, 0, user_data[2], user_data[3], user_data[4], user_data[5])
+    await assign_rank_role(user, 0)
+    embed = discord.Embed(title="🔄 Points Reset", description=f"Reset points for {user.name}.", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def adjust_points(ctx, user: discord.Member, amount: int):
-    try:
-        user_data = get_user(user.id)
-        if not user_data:
-            logger.error(f"Failed to fetch user data for {user.name} ({user.id})")
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Unable to load user data. Try again later.", color=discord.Color.red()))
-            return
-        new_points = max(0, user_data[1] + amount)
-        update_user(user.id, new_points, user_data[2], user_data[3], user_data[4], user_data[5])
-        await assign_rank_role(user, new_points)
-        embed = discord.Embed(title="📈 Points Adjusted", description=f"Adjusted {user.name}'s points by {amount}. New total: {new_points}.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        logger.info(f"Adjusted {user.name}'s points by {amount} by {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !adjust_points for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to adjust points.", color=discord.Color.red()))
+    user_data = get_user(user.id)
+    if not user_data:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+    
+    new_points = max(0, user_data[1] + amount)
+    update_user(user.id, new_points, user_data[2], user_data[3], user_data[4], user_data[5])
+    await assign_rank_role(user, new_points)
+    embed = discord.Embed(title="📈 Points Adjusted", description=f"Adjusted {user.name}'s points by {amount}. New: {new_points}.", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def ban_from_matchmaking(ctx, user: discord.Member):
-    try:
+    user_data = get_user(user.id)
+    if not user_data:
+        update_user(user.id, banned=1)
         user_data = get_user(user.id)
         if not user_data:
-            update_user(user.id, 0, 1000, 0, 0, 1)
-            user_data = get_user(user.id)
-            if not user_data:
-                logger.error(f"Failed to fetch user data for {user.name} ({user.id}) after update")
-                await ctx.send(embed=discord.Embed(title="❌ Error", description="Unable to load user data. Try again later.", color=discord.Color.red()))
-                return
-        update_user(user.id, user_data[1], user_data[2], user_data[3], user_data[4], 1 if user_data[5] == 0 else 0)
-        action = "banned" if user_data[5] == 0 else "unbanned"
-        embed = discord.Embed(title="🚫 Matchmaking Ban", description=f"{user.name} has been {action} from matchmaking.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await ctx.send(embed=embed)
-        logger.info(f"{user.name} {action} from matchmaking by {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !ban_from_matchmaking for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to update ban status.", color=discord.Color.red()))
+            return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+    
+    new_ban_status = 1 if user_data[5] == 0 else 0
+    update_user(user.id, user_data[1], user_data[2], user_data[3], user_data[4], new_ban_status)
+    action = "banned" if new_ban_status else "unbanned"
+    embed = discord.Embed(title="🚫 Matchmaking Ban", description=f"{user.name} {action} from matchmaking.", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def dispute(ctx, match_id: int):
-    try:
-        cursor.execute('SELECT * FROM matches WHERE match_id = ?', (match_id,))
-        match = cursor.fetchone()
-        if not match:
-            await ctx.send(embed=discord.Embed(title="❌ Error", description="Match not found!", color=discord.Color.red()))
-            return
-        channel = discord.utils.get(ctx.guild.text_channels, name='match-logs') or ctx.channel
-        embed = discord.Embed(title="⚖️ Dispute Filed", description=f"Dispute for Match #{match_id} by {ctx.author.mention}. Admins will review.", color=discord.Color.blue())
-        embed.add_field(name="Match Details", value=f"Format: {match[1]}\nTeam 1: {match[2]}\nTeam 2: {match[3]}\nWinner: {match[4]}", inline=False)
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub")
-        await channel.send(embed=embed)
-        await ctx.send(embed=discord.Embed(title="✅ Dispute Submitted", description=f"Dispute for Match #{match_id} filed.", color=discord.Color.green()))
-        logger.info(f"Dispute for match #{match_id} filed by {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !dispute for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to file dispute.", color=discord.Color.red()))
+    cursor.execute('SELECT * FROM matches WHERE match_id = ?', (match_id,))
+    match = cursor.fetchone()
+    if not match:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="Match not found!", color=discord.Color.red()))
+    
+    channel = discord.utils.get(ctx.guild.text_channels, name='match-logs') or ctx.channel
+    embed = discord.Embed(
+        title="⚖️ Dispute Filed",
+        description=f"Dispute for Match #{match_id} by {ctx.author.mention}. Admins will review.",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Match Details", value=f"Format: {match[1]}\nTeam 1: {match[2]}\nTeam 2: {match[3]}\nWinner: {match[4]}", inline=False)
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await channel.send(embed=embed)
+    await ctx.send(embed=discord.Embed(title="✅ Dispute Submitted", description=f"Dispute for Match #{match_id} filed.", color=discord.Color.green()))
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def announce(ctx, *, message):
-    try:
-        channel = discord.utils.get(ctx.guild.text_channels, name='announcements') or ctx.channel
-        embed = discord.Embed(title="📢 Announcement", description=message, color=discord.Color.purple())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text="Siege Competitive Hub", icon_url=bot.user.avatar.url if bot.user.avatar else THUMBNAIL_URL)
-        embed.timestamp = datetime.now(timezone.utc)
-        await channel.send(embed=embed)
-        await ctx.send(embed=discord.Embed(title="✅ Announced", description="Announcement posted!", color=discord.Color.green()))
-        logger.info(f"Announcement posted by {ctx.author.name}")
-    except Exception as e:
-        logger.error(f"Error in !announce for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to post announcement.", color=discord.Color.red()))
+    channel = discord.utils.get(ctx.guild.text_channels, name='announcements') or ctx.channel
+    embed = discord.Embed(title="📢 Announcement", description=message, color=discord.Color.purple())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    embed.timestamp = datetime.now(timezone.utc)
+    await channel.send(embed=embed)
+    await ctx.send(embed=discord.Embed(title="✅ Announced", description="Announcement posted!", color=discord.Color.green()))
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def clear_match(ctx):
     global current_match
-    try:
-        if current_match:
-            cursor.execute('UPDATE matches SET status = ? WHERE match_id = ?', ('cancelled', current_match))
-            conn.commit()
-            # Clear only match teams
-            cursor.execute('SELECT team1, team2 FROM matches WHERE match_id = ?', (current_match,))
-            match = cursor.fetchone()
-            if match:
-                for team in [t for t, data in active_teams.items() if any(m.name in match[0] + match[1] for m in data['members'])]:
-                    del active_teams[team]
-            current_match = None
-            await ctx.send(embed=discord.Embed(title="🛑 Match Cleared", description="Active match cleared.", color=discord.Color.green()))
-            logger.info(f"Match cleared by {ctx.author.name}")
-        else:
-            await ctx.send(embed=discord.Embed(title="❌ No Active Match", description="No match to clear!", color=discord.Color.red()))
-    except Exception as e:
-        logger.error(f"Error in !clear_match for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to clear match.", color=discord.Color.red()))
+    if not current_match:
+        return await ctx.send(embed=discord.Embed(title="❌ Error", description="No active match!", color=discord.Color.red()))
+    
+    cursor.execute('UPDATE matches SET status = ? WHERE match_id = ?', ('cancelled', current_match))
+    conn.commit()
+    cursor.execute('SELECT team1, team2 FROM matches WHERE match_id = ?', (current_match,))
+    match = cursor.fetchone()
+    if match:
+        for team in [t for t, data in active_teams.items() if any(m.name in match[0] + match[1] for m in data['members'])]:
+            del active_teams[team]
+    current_match = None
+    embed = discord.Embed(title="🛑 Match Cleared", description="Active match cleared.", color=discord.Color.green())
+    embed.set_thumbnail(url=THUMBNAIL_URL)
+    embed.set_footer(text=get_footer_text())
+    await ctx.send(embed=embed)
 
 @bot.event
 async def on_reaction_add(reaction, user):
     global format_votes, votes
+    if user.bot or not reaction.message.author.bot:
+        return
+    
     try:
-        if user.bot or not reaction.message.author.bot:
-            return
-
-        if reaction.message.embeds and "Vote for Match Format" in reaction.message.embeds[0].title:
-            emoji = str(reaction.emoji)
+        embed_title = reaction.message.embeds[0].title if reaction.message.embeds else ""
+        emoji = str(reaction.emoji)
+        
+        if "Vote for Match Format" in embed_title:
             if emoji in [f"{i+1}️⃣" for i in range(len(MATCH_FORMATS))]:
-                # Use only the first character if it's a digit (for emoji like "1️⃣")
-                try:
-                    fmt_index = int(emoji[0]) - 1
-                    if 0 <= fmt_index < len(MATCH_FORMATS):
-                        fmt = MATCH_FORMATS[fmt_index]
-                        format_votes[fmt] = format_votes.get(fmt, 0) + 1
-                        logger.debug(f"{user.name} voted for format {fmt}")
-                except (ValueError, IndexError):
-                    pass
-
-        if reaction.message.embeds and "Vote for Winner" in reaction.message.embeds[0].title:
-            emoji = str(reaction.emoji)
+                fmt_index = int(emoji[0]) - 1
+                if 0 <= fmt_index < len(MATCH_FORMATS):
+                    fmt = MATCH_FORMATS[fmt_index]
+                    format_votes[fmt] = format_votes.get(fmt, 0) + 1
+        
+        if "Vote for Winner" in embed_title:
             if emoji == "1️⃣":
                 votes['team1'] = votes.get('team1', 0) + 1
-                logger.debug(f"{user.name} voted for Team 1")
             elif emoji == "2️⃣":
                 votes['team2'] = votes.get('team2', 0) + 1
-                logger.debug(f"{user.name} voted for Team 2")
     except Exception as e:
         logger.error(f"Error in on_reaction_add for {user.name}: {e}")
 
 # Run bot
-# SECURITY WARNING: Reset this token after use in Discord Developer Portal to prevent unauthorized access!
 if __name__ == "__main__":
     if not conn:
         logger.error("Failed to initialize database. Exiting.")
     else:
         try:
-            bot.run('BOT-TOKEN')
+            bot.run('YOUR_BOT_TOKEN')  # Replace with your bot token
         except Exception as e:
             logger.error(f"Failed to start bot: {e}")
