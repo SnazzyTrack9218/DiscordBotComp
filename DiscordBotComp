@@ -892,6 +892,6 @@ if __name__ == "__main__":
         logger.error("Failed to initialize database. Exiting.")
     else:
         try:
-            bot.run('MTM3MTI3OTk5MDE3OTc2MjIyOA.GTKeEI.OlZvhLUSniwU2bIrrz4oU3kntlRa3-2UEhRZfk')
+            bot.run('BOT-TOKEN')
         except Exception as e:
             logger.error(f"Failed to start bot: {e}")
