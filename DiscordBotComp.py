@@ -1,14 +1,13 @@
 import discord
 from discord.ext import commands, tasks
+from discord.ui import Button, View
 import sqlite3
 import asyncio
-import random
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import time
 import logging
 import os
-import uuid
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,7 +19,7 @@ intents.message_content = True
 intents.members = True
 intents.reactions = True
 bot = commands.Bot(command_prefix='!', intents=intents)
-bot.remove_command('help')  # Remove default help command
+bot.remove_command('help')
 
 # Command restriction
 COMMANDS_CHANNEL = "commands"
@@ -28,12 +27,7 @@ COMMANDS_CHANNEL = "commands"
 @bot.check
 async def restrict_commands_channel(ctx):
     if ctx.channel.name != COMMANDS_CHANNEL:
-        embed = discord.Embed(
-            title="❌ Wrong Channel",
-            description=f"Commands can only be used in #{COMMANDS_CHANNEL}!",
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed)
+        await ctx.send(embed=discord.Embed(title="❌ Wrong Channel", description=f"Use #{COMMANDS_CHANNEL}!", color=discord.Color.red()))
         return False
     return True
 
@@ -50,12 +44,6 @@ def init_db():
             losses INTEGER DEFAULT 0,
             banned INTEGER DEFAULT 0
         )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS teams (
-            team_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            team_name TEXT UNIQUE,
-            leader_id INTEGER,
-            registered_at TEXT
-        )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS matches (
             match_id INTEGER PRIMARY KEY AUTOINCREMENT,
             format TEXT,
@@ -65,15 +53,6 @@ def init_db():
             points INTEGER,
             status TEXT,
             timestamp TEXT
-        )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS profiles (
-            user_id INTEGER PRIMARY KEY,
-            bio TEXT,
-            favorite_team TEXT
-        )''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS sponsors (
-            sponsor_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sponsor_name TEXT
         )''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS daily_claims (
             user_id INTEGER PRIMARY KEY,
@@ -88,14 +67,12 @@ def init_db():
 conn, cursor = init_db()
 
 # Bot variables
-TOURNAMENT_FEE = 500
-BADGE_PRICES = {'Elite': 200, 'Pro': 500, 'Legend': 1000}
 MATCH_FORMATS = ['1v1', '2v2', '3v3', '4v4', '5v5']
 THUMBNAIL_URL = os.getenv("THUMBNAIL_URL", "https://www.pngall.com/wp-content/uploads/5/Rainbow-Six-Siege-Logo-PNG-Free-Download.png")
 MATCH_COOLDOWN = 300  # 5 minutes
 DAILY_CURRENCY = 100
 DAILY_COOLDOWN = 24 * 60 * 60  # 24 hours
-MATCH_WIN_CURRENCY = 50
+MATCH_WIN_CURRENCY = 100
 current_match = None
 votes = {}
 format_votes = {}
@@ -104,27 +81,13 @@ active_teams = {}
 
 # Helper functions
 def get_footer_text():
-    return "Siege Competitive Hub - Powered by Dynamic Footer"
-
-def get_sponsor_message():
-    try:
-        cursor.execute('SELECT sponsor_name FROM sponsors')
-        sponsors = cursor.fetchall()
-        return "Thank you to our sponsors: " + (", ".join(s[0] for s in sponsors) if sponsors else "[No sponsors available]")
-    except sqlite3.Error as e:
-        logger.error(f"Error fetching sponsors: {e}")
-        return "Thank you to our sponsors: [Error fetching sponsors]"
+    return "Siege Competitive Hub"
 
 async def log_error_to_channel(guild, message):
     try:
         channel = discord.utils.get(guild.text_channels, name='bot-logs')
         if channel:
-            embed = discord.Embed(
-                title="❌ Bot Error",
-                description=message,
-                color=discord.Color.red(),
-                timestamp=datetime.now(timezone.utc)
-            )
+            embed = discord.Embed(title="❌ Bot Error", description=message, color=discord.Color.red(), timestamp=datetime.now(timezone.utc))
             embed.set_footer(text=get_footer_text())
             await channel.send(embed=embed)
     except Exception as e:
@@ -158,16 +121,9 @@ def deduct_currency(user_id, amount):
     update_user(user_id, user[1], user[2] - amount, user[3], user[4], user[5])
     return True
 
-def get_rank(points):
-    if points > 1000:
-        return "Gold"
-    elif points > 500:
-        return "Silver"
-    return "Bronze"
-
 async def assign_rank_role(member, points):
     try:
-        rank = get_rank(points)
+        rank = "Gold" if points > 1000 else "Silver" if points > 500 else "Bronze"
         role_name = f"Rank_{rank}"
         role = discord.utils.get(member.guild.roles, name=role_name)
         if not role:
@@ -190,26 +146,6 @@ async def on_ready():
     logger.info(f'Logged in as {bot.user}')
     save_data.start()
 
-@bot.event
-async def on_member_join(member):
-    try:
-        channel = discord.utils.get(member.guild.text_channels, name='welcome') or member.guild.text_channels[0]
-        if not channel:
-            return
-        account_age = (datetime.now(timezone.utc) - member.created_at).days
-        embed = discord.Embed(
-            title="🎮 Welcome to Siege Competitive Hub!",
-            description=f"Welcome, {member.mention}! Account age: **{account_age} days**.\nUse `!help` in #{COMMANDS_CHANNEL} for commands!",
-            color=discord.Color.blue()
-        )
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        embed.timestamp = datetime.now(timezone.utc)
-        await channel.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in on_member_join for {member.name}: {e}")
-        await log_error_to_channel(member.guild, f"Error in on_member_join for {member.name}: {e}")
-
 @tasks.loop(minutes=5)
 async def save_data():
     try:
@@ -222,199 +158,30 @@ async def save_data():
 @bot.command()
 async def help(ctx):
     try:
-        embed = discord.Embed(
-            title="🎮 Siege Competitive Hub Commands",
-            description="Rainbow Six Siege tournament and match hub!",
-            color=discord.Color.purple()
-        )
+        embed = discord.Embed(title="🎮 Siege Competitive Hub Commands", description="Simplified R6 bot!", color=discord.Color.purple())
         commands_list = [
-            ("📋 !register_team <name>", f"Register team ({TOURNAMENT_FEE} currency)"),
-            ("🏅 !buy_badge <name>", "Buy badge (Elite, Pro, Legend)"),
-            ("⚔️ !create_team <name>", "Create matchmaking team"),
-            ("🤝 !join_team <name>", "Join a team"),
-            ("🎯 !start_match", "Start skill-based match"),
-            ("🏆 !vote_winner", "Vote match winner"),
+            ("🎯 !start_match", "Start a skill-based match"),
+            ("🏁 !matchend", "End match and vote for winner"),
             ("📜 !match_history [user]", "View match history"),
             ("👤 !profile [user]", "View user profile"),
-            ("✍️ !set_bio <bio>", "Set profile bio"),
-            ("⭐ !set_favorite <team/player>", "Set favorite team/player"),
             ("📊 !leaderboard", "Top 10 players"),
             ("💰 !balance", "Check currency"),
-            ("🎁 !daily", "Claim daily currency"),
-            ("🙌 !sponsor", "View sponsors"),
-            ("💡 !suggest <feedback>", "Submit feedback"),
-            ("🔧 !add_currency <user> <amount>", "Admin: Add currency"),
-            ("🔄 !reset_points <user>", "Admin: Reset points"),
-            ("📈 !adjust_points <user> <amount>", "Admin: Adjust points"),
-            ("🚫 !ban_from_matchmaking <user>", "Admin: Ban/unban from matchmaking"),
+            ("🎁 !daily", "Claim daily reward"),
             ("⚖️ !dispute <match_id>", "Report match issue"),
-            ("🛑 !clear_match", "Admin: Clear active match"),
-            ("📢 !announce <message>", "Admin: Post announcement")
+            ("🔧 !add_currency <user> <amount>", "Admin: Add currency"),
+            ("📈 !adjust_points <user> <amount>", "Admin: Adjust points"),
+            ("🚫 !ban_from_matchmaking <user>", "Admin: Ban/unban"),
+            ("🛑 !clear_match", "Admin: Clear active match")
         ]
         for name, value in commands_list:
             embed.add_field(name=name, value=value, inline=False)
         embed.set_thumbnail(url=THUMBNAIL_URL)
         embed.set_footer(text=get_footer_text())
-        embed.timestamp = datetime.now(timezone.utc)
         await ctx.send(embed=embed)
     except Exception as e:
-        logger.error(f"Error in !help for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !help for {ctx.author.name}: {e}")
+        logger.error(f"Error in !help: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !help: {e}")
         await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to display help.", color=discord.Color.red()))
-
-@bot.command()
-async def daily(ctx):
-    try:
-        user_id = ctx.author.id
-        user = get_user(user_id)
-        if not user:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
-        
-        cursor.execute('SELECT last_claim FROM daily_claims WHERE user_id = ?', (user_id,))
-        last_claim = cursor.fetchone()
-        
-        current_time = datetime.now(timezone.utc)
-        if last_claim:
-            last_claim_time = datetime.fromisoformat(last_claim[0])
-            if (current_time - last_claim_time).total_seconds() < DAILY_COOLDOWN:
-                remaining = DAILY_COOLDOWN - (current_time - last_claim_time).total_seconds()
-                hours, remainder = divmod(int(remaining), 3600)
-                minutes, seconds = divmod(remainder, 60)
-                return await ctx.send(embed=discord.Embed(
-                    title="❌ Cooldown",
-                    description=f"Wait {hours}h {minutes}m {seconds}s for next claim!",
-                    color=discord.Color.red()
-                ))
-        
-        update_user(user_id, user[1], user[2] + DAILY_CURRENCY, user[3], user[4], user[5])
-        cursor.execute('INSERT OR REPLACE INTO daily_claims (user_id, last_claim) VALUES (?, ?)',
-                      (user_id, current_time.isoformat()))
-        conn.commit()
-        
-        embed = discord.Embed(
-            title="🎁 Daily Reward",
-            description=f"Claimed {DAILY_CURRENCY} currency! Come back in 24 hours.",
-            color=discord.Color.green()
-        )
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in !daily for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !daily for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to claim daily reward.", color=discord.Color.red()))
-
-@bot.command()
-async def register_team(ctx, *, team_name):
-    try:
-        user_id = ctx.author.id
-        user = get_user(user_id)
-        if not user:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
-        
-        cursor.execute('SELECT team_name FROM teams WHERE team_name = ?', (team_name,))
-        if cursor.fetchone():
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="Team name taken!", color=discord.Color.red()))
-        
-        if not deduct_currency(user_id, TOURNAMENT_FEE):
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Need {TOURNAMENT_FEE} currency!", color=discord.Color.red()))
-        
-        cursor.execute('INSERT INTO teams (team_name, leader_id, registered_at) VALUES (?, ?, ?)',
-                      (team_name, user_id, datetime.now().isoformat()))
-        conn.commit()
-        embed = discord.Embed(title="✅ Team Registered", description=f"'{team_name}' registered! Fee: {TOURNAMENT_FEE}.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in !register_team for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !register_team for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to register team.", color=discord.Color.red()))
-
-@bot.command()
-async def buy_badge(ctx, badge_name: str):
-    try:
-        badge_name = badge_name.capitalize()
-        if badge_name not in BADGE_PRICES:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Badge '{badge_name}' invalid.", color=discord.Color.red()))
-        
-        user_id = ctx.author.id
-        user = get_user(user_id)
-        if not user:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
-        
-        if f"Badge_{badge_name}" in [r.name for r in ctx.author.roles]:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"You have {badge_name} badge!", color=discord.Color.red()))
-        
-        price = BADGE_PRICES[badge_name]
-        if not deduct_currency(user_id, price):
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description=f"Need {price} currency!", color=discord.Color.red()))
-        
-        role = discord.utils.get(ctx.guild.roles, name=f"Badge_{badge_name}")
-        if not role:
-            role = await ctx.guild.create_role(name=f"Badge_{badge_name}", color=discord.Color.gold())
-        
-        await ctx.author.add_roles(role)
-        embed = discord.Embed(title="🏅 Badge Purchased", description=f"Purchased {badge_name} for {price} currency!", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in !buy_badge for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !buy_badge for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to purchase badge.", color=discord.Color.red()))
-
-@bot.command()
-async def create_team(ctx, *, name):
-    try:
-        user_id = ctx.author.id
-        user = get_user(user_id)
-        if not user:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
-        
-        if user[5]:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="You are banned!", color=discord.Color.red()))
-        
-        if name in active_teams:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="Team name taken!", color=discord.Color.red()))
-        
-        active_teams[name] = {'leader': ctx.author, 'members': [ctx.author], 'points': user[1]}
-        embed = discord.Embed(title="⚔️ Team Created", description=f"Team '{name}' created! Use `!join_team {name}`.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in !create_team for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !create_team for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to create team.", color=discord.Color.red()))
-
-@bot.command()
-async def join_team(ctx, *, name):
-    try:
-        user_id = ctx.author.id
-        user = get_user(user_id)
-        if not user:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
-        
-        if user[5]:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="You are banned!", color=discord.Color.red()))
-        
-        if name not in active_teams:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="Team not found!", color=discord.Color.red()))
-        
-        if ctx.author in active_teams[name]['members']:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="Already in team!", color=discord.Color.red()))
-        
-        active_teams[name]['members'].append(ctx.author)
-        active_teams[name]['points'] = sum(get_user(m.id)[1] for m in active_teams[name]['members']) / len(active_teams[name]['members'])
-        embed = discord.Embed(title="🤝 Joined Team", description=f"You joined '{name}'!", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in !join_team for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !join_team for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to join team.", color=discord.Color.red()))
 
 @bot.command()
 async def start_match(ctx):
@@ -478,7 +245,7 @@ async def start_match(ctx):
         # Announce currency reward
         embed = discord.Embed(
             title="💰 Match Reward",
-            description=f"Winning team gains 100 currency per player! Join a team using buttons below.",
+            description=f"Winning team gains {MATCH_WIN_CURRENCY} currency per player! Join a team using buttons.",
             color=discord.Color.blue()
         )
         embed.set_thumbnail(url=THUMBNAIL_URL)
@@ -490,13 +257,13 @@ async def start_match(ctx):
         await asyncio.sleep(30)
         view.stop()
         
-        # Check team sizes for 1v1
+        # Check team sizes
         team1_count = len(active_teams[team1_name]['members'])
         team2_count = len(active_teams[team2_name]['members'])
-        if chosen_format == '1v1' and (team1_count == 0 and team2_count == 0):
+        if chosen_format == '1v1' and team1_count == 0 and team2_count == 0:
             return await ctx.send(embed=discord.Embed(
                 title="❌ Error",
-                description="Need at least 1 player in either team for 1v1!",
+                description="Need at least 1 player for 1v1!",
                 color=discord.Color.red()
             ))
         elif chosen_format != '1v1' and (team1_count < team_size or team2_count < team_size):
@@ -523,7 +290,7 @@ async def start_match(ctx):
         
         embed = discord.Embed(
             title="⚔️ Match Started",
-            description=f"**Format**: {chosen_format}\n**Team 1**: {team1_names}\n**Team 2**: {team2_names}\n**Reward**: 100 currency per winner",
+            description=f"**Format**: {chosen_format}\n**Team 1**: {team1_names}\n**Team 2**: {team2_names}\n**Reward**: {MATCH_WIN_CURRENCY} currency per winner",
             color=discord.Color.blue()
         )
         embed.set_thumbnail(url=THUMBNAIL_URL)
@@ -538,11 +305,10 @@ async def start_match(ctx):
         for member in team1_members + team2_members:
             cooldowns[member.id] = time.time() + MATCH_COOLDOWN
     except Exception as e:
-        logger.error(f"Error in !start_match for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !start_match for {ctx.author.name}: {e}")
+        logger.error(f"Error in !start_match: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !start_match: {e}")
         await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to start match.", color=discord.Color.red()))
 
-# Add this new class after start_match
 class TeamJoinView(discord.ui.View):
     def __init__(self, team1_name, team2_name):
         super().__init__(timeout=30)
@@ -552,7 +318,6 @@ class TeamJoinView(discord.ui.View):
     @discord.ui.button(label="Join Team 1", style=discord.ButtonStyle.primary, emoji="1️⃣")
     async def join_team1(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
-        # Remove from other team
         for team_name in [self.team1_name, self.team2_name]:
             if user in active_teams[team_name]['members']:
                 active_teams[team_name]['members'].remove(user)
@@ -560,7 +325,6 @@ class TeamJoinView(discord.ui.View):
                     active_teams[team_name]['leader'] = active_teams[team_name]['members'][0]
                 elif active_teams[team_name]['leader'] == user:
                     active_teams[team_name]['leader'] = None
-        # Add to Team 1
         if user not in active_teams[self.team1_name]['members']:
             active_teams[self.team1_name]['members'].append(user)
             if not active_teams[self.team1_name]['leader']:
@@ -570,7 +334,6 @@ class TeamJoinView(discord.ui.View):
     @discord.ui.button(label="Join Team 2", style=discord.ButtonStyle.primary, emoji="2️⃣")
     async def join_team2(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
-        # Remove from other team
         for team_name in [self.team1_name, self.team2_name]:
             if user in active_teams[team_name]['members']:
                 active_teams[team_name]['members'].remove(user)
@@ -578,37 +341,14 @@ class TeamJoinView(discord.ui.View):
                     active_teams[team_name]['leader'] = active_teams[team_name]['members'][0]
                 elif active_teams[team_name]['leader'] == user:
                     active_teams[team_name]['leader'] = None
-        # Add to Team 2
         if user not in active_teams[self.team2_name]['members']:
             active_teams[self.team2_name]['members'].append(user)
             if not active_teams[self.team2_name]['leader']:
                 active_teams[self.team2_name]['leader'] = user
         await interaction.response.send_message(f"{user.mention} joined Team 2!", ephemeral=True)
 
-# Replace on_reaction_add (lines 614-635)
-@bot.event
-async def on_reaction_add(reaction, user):
-    global format_votes
-    if user.bot or not reaction.message.author.bot:
-        return
-    
-    try:
-        embed_title = reaction.message.embeds[0].title if reaction.message.embeds else ""
-        emoji = str(reaction.emoji)
-        
-        if "Vote Match Format" in embed_title:
-            if emoji in [f"{i+1}️⃣" for i in range(len(MATCH_FORMATS))]:
-                fmt_index = int(emoji[0]) - 1
-                if 0 <= fmt_index < len(MATCH_FORMATS):
-                    fmt = MATCH_FORMATS[fmt_index]
-                    format_votes[fmt] = format_votes.get(fmt, 0) + 1
-                    logger.info(f"Format vote: {user.name} voted for {fmt}")
-    except Exception as e:
-        logger.error(f"Error in on_reaction_add for {user.name}: {e}")
-        await log_error_to_channel(reaction.message.guild, f"Error in on_reaction_add for {user.name}: {e}")
-
 @bot.command()
-async def vote_winner(ctx):
+async def matchend(ctx):
     try:
         global current_match, votes
         if not current_match:
@@ -619,11 +359,15 @@ async def vote_winner(ctx):
         if not match:
             return await ctx.send(embed=discord.Embed(title="❌ Error", description="Match not found!", color=discord.Color.red()))
         team1, team2, match_format = match
+
+        # Define team names for cleanup
+        team1_name = "Team 1"
+        team2_name = "Team 2"
         
         votes.clear()
-        embed = discord.Embed(title="🏆 Vote Winner", description="React to choose winner!", color=discord.Color.purple())
-        embed.add_field(name="**Team 1**", value=team1, inline=True)
-        embed.add_field(name="**Team 2**", value=team2, inline=True)
+        embed = discord.Embed(title="🏆 Vote Winner", description="Who won? React to choose!", color=discord.Color.purple())
+        embed.add_field(name="Team 1", value=team1, inline=True)
+        embed.add_field(name="Team 2", value=team2, inline=True)
         embed.set_thumbnail(url=THUMBNAIL_URL)
         embed.set_footer(text="Voting ends in 30s")
         msg = await ctx.send(embed=embed)
@@ -637,8 +381,9 @@ async def vote_winner(ctx):
         if team1_votes == team2_votes:
             cursor.execute('UPDATE matches SET status = ?, winner = ?, points = ? WHERE match_id = ?', ('completed', 'Tie', 0, current_match))
             conn.commit()
-            for team in [t for t, data in active_teams.items() if any(m.name in team1 + team2 for m in data['members'])]:
-                del active_teams[team]
+            for team in [team1_name, team2_name]:
+                if team in active_teams:
+                    del active_teams[team]
             current_match = None
             return await ctx.send(embed=discord.Embed(title="🤝 Tie", description="No points awarded!", color=discord.Color.orange()))
         
@@ -676,13 +421,14 @@ async def vote_winner(ctx):
         embed.set_footer(text=get_footer_text())
         await ctx.send(embed=embed)
         
-        for team in [t for t, data in active_teams.items() if any(m.name in team1 + team2 for m in data['members'])]:
-            del active_teams[team]
+        for team in [team1_name, team2_name]:
+            if team in active_teams:
+                del active_teams[team]
         current_match = None
     except Exception as e:
-        logger.error(f"Error in !vote_winner for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !vote_winner for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to process winner vote.", color=discord.Color.red()))
+        logger.error(f"Error in !matchend: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !matchend: {e}")
+        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to end match.", color=discord.Color.red()))
 
 @bot.command()
 async def match_history(ctx, user: discord.Member = None):
@@ -707,11 +453,10 @@ async def match_history(ctx, user: discord.Member = None):
             )
         embed.set_thumbnail(url=THUMBNAIL_URL)
         embed.set_footer(text=get_footer_text())
-        embed.timestamp = datetime.now(timezone.utc)
         await ctx.send(embed=embed)
     except Exception as e:
-        logger.error(f"Error in !match_history for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !match_history for {ctx.author.name}: {e}")
+        logger.error(f"Error in !match_history: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !match_history: {e}")
         await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to fetch match history.", color=discord.Color.red()))
 
 @bot.command()
@@ -722,87 +467,40 @@ async def profile(ctx, user: discord.Member = None):
         if not user_data:
             return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
         
-        cursor.execute('SELECT bio, favorite_team FROM profiles WHERE user_id = ?', (target.id,))
-        profile = cursor.fetchone() or ('No bio set', 'None')
-        badges = ', '.join(r.name for r in target.roles if r.name.startswith('Badge_')) or 'None'
         team = next((name for name, data in active_teams.items() if target in data['members']), 'None')
-        rank = get_rank(user_data[1])
+        rank = "Gold" if user_data[1] > 1000 else "Silver" if user_data[1] > 500 else "Bronze"
         embed = discord.Embed(title=f"👤 {target.name}'s Profile", color=discord.Color.purple())
         embed.add_field(name="Rank", value=rank, inline=True)
         embed.add_field(name="Points", value=user_data[1], inline=True)
-        embed.add_field(name="Badges", value=badges, inline=True)
-        embed.add_field(name="Wins/Losses | W/L Ratio", 
-                        value=f"{user_data[3]}/{user_data[4]} | {user_data[3] / (user_data[3] + user_data[4]) * 100:.1f}%" if user_data[3] + user_data[4] > 0 else "No matches", 
-                        inline=True)
+        embed.add_field(name="Wins/Losses", value=f"{user_data[3]}/{user_data[4]}", inline=True)
         embed.add_field(name="Currency", value=user_data[2], inline=True)
         embed.add_field(name="Team", value=team, inline=True)
-        embed.add_field(name="Bio", value=profile[0], inline=False)
-        embed.add_field(name="Favorite Team/Player", value=profile[1], inline=False)
         embed.set_thumbnail(url=target.avatar.url if target.avatar else THUMBNAIL_URL)
         embed.set_footer(text=get_footer_text())
-        embed.timestamp = datetime.now(timezone.utc)
         await ctx.send(embed=embed)
     except Exception as e:
-        logger.error(f"Error in !profile for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !profile for {ctx.author.name}: {e}")
+        logger.error(f"Error in !profile: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !profile: {e}")
         await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to display profile.", color=discord.Color.red()))
-
-@bot.command()
-async def set_bio(ctx, *, bio):
-    try:
-        if len(bio) > 200:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="Bio too long (<200 chars)!", color=discord.Color.red()))
-        
-        cursor.execute('INSERT OR REPLACE INTO profiles (user_id, bio, favorite_team) VALUES (?, ?, (SELECT favorite_team FROM profiles WHERE user_id = ?))',
-                      (ctx.author.id, bio, ctx.author.id))
-        conn.commit()
-        embed = discord.Embed(title="✍️ Bio Updated", description=f"Bio set to: {bio}", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in !set_bio for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !set_bio for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to set bio.", color=discord.Color.red()))
-
-@bot.command()
-async def set_favorite(ctx, *, favorite):
-    try:
-        if len(favorite) > 50:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="Favorite too long (<50 chars)!", color=discord.Color.red()))
-        
-        cursor.execute('SELECT bio FROM profiles WHERE user_id = ?', (ctx.author.id,))
-        bio = cursor.fetchone()[0] if cursor.fetchone() else 'No bio set'
-        cursor.execute('INSERT OR REPLACE INTO profiles (user_id, bio, favorite_team) VALUES (?, ?, ?)',
-                      (ctx.author.id, bio, favorite))
-        conn.commit()
-        embed = discord.Embed(title="⭐ Favorite Updated", description=f"Favorite set to: {favorite}", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in !set_favorite for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !set_favorite for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to set favorite.", color=discord.Color.red()))
 
 @bot.command()
 async def leaderboard(ctx):
     try:
         cursor.execute('SELECT user_id, points FROM users ORDER BY points DESC LIMIT 10')
         leaders = cursor.fetchall()
-        embed = discord.Embed(title="📊 Leaderboard", description="Top players by points!", color=discord.Color.purple())
+        embed = discord.Embed(title="📊 Leaderboard", description="Top players!", color=discord.Color.purple())
         if not leaders:
             embed.add_field(name="Empty", value="No players yet!", inline=False)
         for i, (user_id, points) in enumerate(leaders, 1):
             user = await bot.fetch_user(user_id)
-            embed.add_field(name=f"**{i}. {user.name}**", value=f"{points} points ({get_rank(points)})", inline=False)
+            rank = "Gold" if points > 1000 else "Silver" if points > 500 else "Bronze"
+            embed.add_field(name=f"**{i}. {user.name}**", value=f"{points} points ({rank})", inline=False)
         embed.set_thumbnail(url=THUMBNAIL_URL)
         embed.set_footer(text=get_footer_text())
-        embed.timestamp = datetime.now(timezone.utc)
         await ctx.send(embed=embed)
     except Exception as e:
-        logger.error(f"Error in !leaderboard for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !leaderboard for {ctx.author.name}: {e}")
+        logger.error(f"Error in !leaderboard: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !leaderboard: {e}")
         await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to display leaderboard.", color=discord.Color.red()))
 
 @bot.command()
@@ -817,118 +515,47 @@ async def balance(ctx):
         embed.set_footer(text=get_footer_text())
         await ctx.send(embed=embed)
     except Exception as e:
-        logger.error(f"Error in !balance for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !balance for {ctx.author.name}: {e}")
+        logger.error(f"Error in !balance: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !balance: {e}")
         await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to check balance.", color=discord.Color.red()))
 
 @bot.command()
-async def sponsor(ctx):
+async def daily(ctx):
     try:
-        embed = discord.Embed(title="🙌 Sponsors", description=get_sponsor_message(), color=discord.Color.purple())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in !sponsor for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !sponsor for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to display sponsors.", color=discord.Color.red()))
-
-@bot.command()
-async def suggest(ctx, *, feedback):
-    try:
-        channel = discord.utils.get(ctx.guild.text_channels, name='suggestions') or ctx.channel
-        embed = discord.Embed(title="💡 Suggestion", description=f"From {ctx.author.mention}: {feedback}", color=discord.Color.blue())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await channel.send(embed=embed)
-        await ctx.send(embed=discord.Embed(title="✅ Submitted", description="Suggestion sent!", color=discord.Color.green()))
-    except Exception as e:
-        logger.error(f"Error in !suggest for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !suggest for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to submit suggestion.", color=discord.Color.red()))
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def add_currency(ctx, user: discord.Member, amount: int):
-    try:
-        if amount <= 0:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="Amount must be positive!", color=discord.Color.red()))
-        
-        user_data = get_user(user.id)
-        if not user_data:
+        user_id = ctx.author.id
+        user = get_user(user_id)
+        if not user:
             return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
         
-        update_user(user.id, user_data[1], user_data[2] + amount, user_data[3], user_data[4], user_data[5])
-        embed = discord.Embed(title="💰 Currency Added", description=f"Added {amount} currency to {user.name}.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in !add_currency for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !add_currency for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to add currency.", color=discord.Color.red()))
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def reset_points(ctx, user: discord.Member):
-    try:
-        user_data = get_user(user.id)
-        if not user_data:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+        cursor.execute('SELECT last_claim FROM daily_claims WHERE user_id = ?', (user_id,))
+        last_claim = cursor.fetchone()
         
-        update_user(user.id, 0, user_data[2], user_data[3], user_data[4], user_data[5])
-        await assign_rank_role(user, 0)
-        embed = discord.Embed(title="🔄 Points Reset", description=f"Reset points for {user.name}.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in !reset_points for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !reset_points for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to reset points.", color=discord.Color.red()))
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def adjust_points(ctx, user: discord.Member, amount: int):
-    try:
-        user_data = get_user(user.id)
-        if not user_data:
-            return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+        current_time = datetime.now(timezone.utc)
+        if last_claim:
+            last_claim_time = datetime.fromisoformat(last_claim[0])
+            if (current_time - last_claim_time).total_seconds() < DAILY_COOLDOWN:
+                remaining = DAILY_COOLDOWN - (current_time - last_claim_time).total_seconds()
+                hours, remainder = divmod(int(remaining), 3600)
+                minutes, _ = divmod(remainder, 60)
+                return await ctx.send(embed=discord.Embed(
+                    title="❌ Cooldown",
+                    description=f"Wait {hours}h {minutes}m for next claim!",
+                    color=discord.Color.red()
+                ))
         
-        new_points = max(0, user_data[1] + amount)
-        update_user(user.id, new_points, user_data[2], user_data[3], user_data[4], user_data[5])
-        await assign_rank_role(user, new_points)
-        embed = discord.Embed(title="📈 Points Adjusted", description=f"Adjusted {user.name}'s points by {amount}. New: {new_points}.", color=discord.Color.green())
-        embed.set_thumbnail(url=THUMBNAIL_URL)
-        embed.set_footer(text=get_footer_text())
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logger.error(f"Error in !adjust_points for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !adjust_points for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to adjust points.", color=discord.Color.red()))
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def ban_from_matchmaking(ctx, user: discord.Member):
-    try:
-        user_data = get_user(user.id)
-        if not user_data:
-            update_user(user.id, banned=1)
-            user_data = get_user(user.id)
-            if not user_data:
-                return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+        update_user(user_id, user[1], user[2] + DAILY_CURRENCY, user[3], user[4], user[5])
+        cursor.execute('INSERT OR REPLACE INTO daily_claims (user_id, last_claim) VALUES (?, ?)',
+                      (user_id, current_time.isoformat()))
+        conn.commit()
         
-        new_ban_status = 1 if user_data[5] == 0 else 0
-        update_user(user.id, user_data[1], user_data[2], user_data[3], user_data[4], new_ban_status)
-        action = "banned" if new_ban_status else "unbanned"
-        embed = discord.Embed(title="🚫 Matchmaking Ban", description=f"{user.name} {action} from matchmaking.", color=discord.Color.green())
+        embed = discord.Embed(title="🎁 Daily Reward", description=f"Claimed {DAILY_CURRENCY} currency!", color=discord.Color.green())
         embed.set_thumbnail(url=THUMBNAIL_URL)
         embed.set_footer(text=get_footer_text())
         await ctx.send(embed=embed)
     except Exception as e:
-        logger.error(f"Error in !ban_from_matchmaking for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !ban_from_matchmaking for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to update ban status.", color=discord.Color.red()))
+        logger.error(f"Error in !daily: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !daily: {e}")
+        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to claim daily reward.", color=discord.Color.red()))
 
 @bot.command()
 async def dispute(ctx, match_id: int):
@@ -950,25 +577,73 @@ async def dispute(ctx, match_id: int):
         await channel.send(embed=embed)
         await ctx.send(embed=discord.Embed(title="✅ Dispute Submitted", description=f"Dispute for Match #{match_id} filed.", color=discord.Color.green()))
     except Exception as e:
-        logger.error(f"Error in !dispute for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !dispute for {ctx.author.name}: {e}")
+        logger.error(f"Error in !dispute: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !dispute: {e}")
         await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to file dispute.", color=discord.Color.red()))
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def announce(ctx, *, message):
+async def add_currency(ctx, user: discord.Member, amount: int):
     try:
-        channel = discord.utils.get(ctx.guild.text_channels, name='announcements') or ctx.channel
-        embed = discord.Embed(title="📢 Announcement", description=message, color=discord.Color.purple())
+        if amount <= 0:
+            return await ctx.send(embed=discord.Embed(title="❌ Error", description="Amount must be positive!", color=discord.Color.red()))
+        
+        user_data = get_user(user.id)
+        if not user_data:
+            return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+        
+        update_user(user.id, user_data[1], user_data[2] + amount, user_data[3], user_data[4], user_data[5])
+        embed = discord.Embed(title="💰 Currency Added", description=f"Added {amount} currency to {user.name}.", color=discord.Color.green())
         embed.set_thumbnail(url=THUMBNAIL_URL)
         embed.set_footer(text=get_footer_text())
-        embed.timestamp = datetime.now(timezone.utc)
-        await channel.send(embed=embed)
-        await ctx.send(embed=discord.Embed(title="✅ Announced", description="Announcement posted!", color=discord.Color.green()))
+        await ctx.send(embed=embed)
     except Exception as e:
-        logger.error(f"Error in !announce for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !announce for {ctx.author.name}: {e}")
-        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to post announcement.", color=discord.Color.red()))
+        logger.error(f"Error in !add_currency: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !add_currency: {e}")
+        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to add currency.", color=discord.Color.red()))
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def adjust_points(ctx, user: discord.Member, amount: int):
+    try:
+        user_data = get_user(user.id)
+        if not user_data:
+            return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+        
+        new_points = max(0, user_data[1] + amount)
+        update_user(user.id, new_points, user_data[2], user_data[3], user_data[4], user_data[5])
+        await assign_rank_role(user, new_points)
+        embed = discord.Embed(title="📈 Points Adjusted", description=f"Adjusted {user.name}'s points by {amount}. New: {new_points}.", color=discord.Color.green())
+        embed.set_thumbnail(url=THUMBNAIL_URL)
+        embed.set_footer(text=get_footer_text())
+        await ctx.send(embed=embed)
+    except Exception as e:
+        logger.error(f"Error in !adjust_points: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !adjust_points: {e}")
+        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to adjust points.", color=discord.Color.red()))
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def ban_from_matchmaking(ctx, user: discord.Member):
+    try:
+        user_data = get_user(user.id)
+        if not user_data:
+            update_user(user.id, banned=1)
+            user_data = get_user(user.id)
+            if not user_data:
+                return await ctx.send(embed=discord.Embed(title="❌ Error", description="User data error.", color=discord.Color.red()))
+        
+        new_ban_status = 1 if user_data[5] == 0 else 0
+        update_user(user.id, user_data[1], user_data[2], user_data[3], user_data[4], new_ban_status)
+        action = "banned" if new_ban_status else "unbanned"
+        embed = discord.Embed(title="🚫 Matchmaking Ban", description=f"{user.name} {action} from matchmaking.", color=discord.Color.green())
+        embed.set_thumbnail(url=THUMBNAIL_URL)
+        embed.set_footer(text=get_footer_text())
+        await ctx.send(embed=embed)
+    except Exception as e:
+        logger.error(f"Error in !ban_from_matchmaking: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !ban_from_matchmaking: {e}")
+        await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to update ban status.", color=discord.Color.red()))
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -980,10 +655,8 @@ async def clear_match(ctx):
         
         cursor.execute('UPDATE matches SET status = ? WHERE match_id = ?', ('cancelled', current_match))
         conn.commit()
-        cursor.execute('SELECT team1, team2 FROM matches WHERE match_id = ?', (current_match,))
-        match = cursor.fetchone()
-        if match:
-            for team in [t for t, data in active_teams.items() if any(m.name in match[0] + match[1] for m in data['members'])]:
+        for team in ["Team 1", "Team 2"]:
+            if team in active_teams:
                 del active_teams[team]
         current_match = None
         embed = discord.Embed(title="🛑 Match Cleared", description="Active match cleared.", color=discord.Color.green())
@@ -991,8 +664,8 @@ async def clear_match(ctx):
         embed.set_footer(text=get_footer_text())
         await ctx.send(embed=embed)
     except Exception as e:
-        logger.error(f"Error in !clear_match for {ctx.author.name}: {e}")
-        await log_error_to_channel(ctx.guild, f"Error in !clear_match for {ctx.author.name}: {e}")
+        logger.error(f"Error in !clear_match: {e}")
+        await log_error_to_channel(ctx.guild, f"Error in !clear_match: {e}")
         await ctx.send(embed=discord.Embed(title="❌ Error", description="Failed to clear match.", color=discord.Color.red()))
 
 @bot.event
@@ -1005,21 +678,24 @@ async def on_reaction_add(reaction, user):
         embed_title = reaction.message.embeds[0].title if reaction.message.embeds else ""
         emoji = str(reaction.emoji)
         
-        if "Vote for Match Format" in embed_title:
+        if "Vote Match Format" in embed_title:
             if emoji in [f"{i+1}️⃣" for i in range(len(MATCH_FORMATS))]:
                 fmt_index = int(emoji[0]) - 1
                 if 0 <= fmt_index < len(MATCH_FORMATS):
                     fmt = MATCH_FORMATS[fmt_index]
                     format_votes[fmt] = format_votes.get(fmt, 0) + 1
+                    logger.info(f"Format vote: {user.name} voted for {fmt}")
         
-        if "Vote for Winner" in embed_title:
+        if "Vote Winner" in embed_title:
             if emoji == "1️⃣":
                 votes['team1'] = votes.get('team1', 0) + 1
+                logger.info(f"Winner vote: {user.name} voted for Team 1")
             elif emoji == "2️⃣":
                 votes['team2'] = votes.get('team2', 0) + 1
+                logger.info(f"Winner vote: {user.name} voted for Team 2")
     except Exception as e:
-        logger.error(f"Error in on_reaction_add for {user.name}: {e}")
-        await log_error_to_channel(reaction.message.guild, f"Error in on_reaction_add for {user.name}: {e}")
+        logger.error(f"Error in on_reaction_add: {e}")
+        await log_error_to_channel(reaction.message.guild, f"Error in on_reaction_add: {e}")
 
 # Run bot
 if __name__ == "__main__":
