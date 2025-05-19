@@ -46,11 +46,13 @@ async def on_member_join(member):
 @bot.command()
 async def apply(ctx):
     if ctx.channel.name != 'apply':
-        await ctx.send("Please use this command in the #apply channel.", delete_after=300)
+        embed = discord.Embed(description="Please use this command in the #apply channel.", color=discord.Color.red())
+        await ctx.send(embed=embed, delete_after=300)
         return
 
     messages_to_delete = [ctx.message]
-    response = await ctx.send("Please provide your Steam profile link.")
+    embed = discord.Embed(description="Please provide your Steam profile link.", color=discord.Color.blue())
+    response = await ctx.send(embed=embed)
     messages_to_delete.append(response)
 
     def check(m):
@@ -61,20 +63,23 @@ async def apply(ctx):
         messages_to_delete.append(steam_msg)
         steam_link = steam_msg.content
 
-        response = await ctx.send("How many hours have you played in Project Zomboid?")
+        embed = discord.Embed(description="How many hours have you played in Project Zomboid?", color=discord.Color.blue())
+        response = await ctx.send(embed=embed)
         messages_to_delete.append(response)
         hours_msg = await bot.wait_for('message', check=check, timeout=60.0)
         messages_to_delete.append(hours_msg)
         hours_played = hours_msg.content
 
-        response = await ctx.send(f"Steam Profile: {steam_link}\nProject Zomboid Hours: {hours_played}\nPlease confirm you have read the rules by replying 'I confirm'.")
+        embed = discord.Embed(description=f"**Steam Profile:** {steam_link}\n**Project Zomboid Hours:** {hours_played}\nPlease confirm you have read the rules by replying 'I confirm'.", color=discord.Color.blue())
+        response = await ctx.send(embed=embed)
         messages_to_delete.append(response)
         confirm_msg = await bot.wait_for('message', check=check, timeout=60.0)
         messages_to_delete.append(confirm_msg)
 
         if confirm_msg.content.lower() == 'i confirm':
+            embed = discord.Embed(description=f"Application submitted for {ctx.author.mention}! **Steam Profile:** {steam_link}, **Project Zomboid Hours:** {hours_played}. Staff or HeadStaff, please approve using the button below.", color=discord.Color.green())
             view = ApproveButton(ctx.author.id)
-            approval_msg = await ctx.send(f"Application submitted for {ctx.author.mention}! Steam Profile: {steam_link}, Project Zomboid Hours: {hours_played}. Staff or HeadStaff, please approve using the button below.", view=view)
+            approval_msg = await ctx.send(embed=embed, view=view)
             messages_to_delete.append(approval_msg)
             await asyncio.sleep(300)  # Wait 5 minutes
             for msg in messages_to_delete:
@@ -83,7 +88,8 @@ async def apply(ctx):
                 except discord.NotFound:
                     pass
         else:
-            response = await ctx.send("You did not confirm reading the rules.")
+            embed = discord.Embed(description="You did not confirm reading the rules.", color=discord.Color.red())
+            response = await ctx.send(embed=embed)
             messages_to_delete.append(response)
             await asyncio.sleep(300)  # Wait 5 minutes
             for msg in messages_to_delete:
@@ -92,9 +98,10 @@ async def apply(ctx):
                 except discord.NotFound:
                     pass
     except asyncio.TimeoutError:
-        response = await ctx.send("You took too long to respond.")
+        embed = discord.Embed(description="You took too long to respond.", color=discord.Color.red())
+        response = await ctx.send(embed=embed)
         messages_to_delete.append(response)
-        await asyncio.sleep(300)  # Wait 5 minutes
+        await asyncio.sleep(60)  # Wait 5 minutes
         for msg in messages_to_delete:
             try:
                 await msg.delete()
