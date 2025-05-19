@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import asyncio
+from datetime import datetime
 
 # Bot setup
 intents = discord.Intents.default()
@@ -34,30 +35,70 @@ async def on_ready():
 @bot.event
 async def on_member_join(member):
     channel = member.guild.system_channel or (await member.guild.text_channels())[0]
-    await channel.send(f"Welcome {member.mention}! Please provide your Steam profile link and Project Zomboid hours by using the `!apply` command.")
+    account_age = (datetime.now(tz=member.created_at.tzinfo) - member.created_at).days // 365
+    embed = discord.Embed(title=f"Welcome {member.display_name}!", color=discord.Color.blue())
+    embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+    embed.add_field(name="Discord Profile", value=member.mention, inline=False)
+    embed.add_field(name="Account Age", value=f"{account_age} years", inline=False)
+    embed.set_footer(text="Please use the !apply command in the #apply channel.")
+    await channel.send(embed=embed)
 
 @bot.command()
 async def apply(ctx):
-    await ctx.send("Please provide your Steam profile link.")
+    if ctx.channel.name != 'apply':
+        await ctx.send("Please use this command in the #apply channel.", delete_after=300)
+        return
+
+    messages_to_delete = [ctx.message]
+    response = await ctx.send("Please provide your Steam profile link.")
+    messages_to_delete.append(response)
 
     def check(m):
         return m.author == ctx.author and m.channel == ctx.channel
 
     try:
         steam_msg = await bot.wait_for('message', check=check, timeout=60.0)
+        messages_to_delete.append(steam_msg)
         steam_link = steam_msg.content
-        await ctx.send("How many hours have you played in Project Zomboid?")
+
+        response = await ctx.send("How many hours have you played in Project Zomboid?")
+        messages_to_delete.append(response)
         hours_msg = await bot.wait_for('message', check=check, timeout=60.0)
+        messages_to_delete.append(hours_msg)
         hours_played = hours_msg.content
-        await ctx.send(f"Steam Profile: {steam_link}\nProject Zomboid Hours: {hours_played}\nPlease confirm you have read the rules by replying 'I confirm'.")
+
+        response = await ctx.send(f"Steam Profile: {steam_link}\nProject Zomboid Hours: {hours_played}\nPlease confirm you have read the rules by replying 'I confirm'.")
+        messages_to_delete.append(response)
         confirm_msg = await bot.wait_for('message', check=check, timeout=60.0)
+        messages_to_delete.append(confirm_msg)
 
         if confirm_msg.content.lower() == 'i confirm':
             view = ApproveButton(ctx.author.id)
-            await ctx.send(f"Application submitted for {ctx.author.mention}! Steam Profile: {steam_link}, Project Zomboid Hours: {hours_played}. Staff or HeadStaff, please approve using the button below.", view=view)
+            approval_msg = await ctx.send(f"Application submitted for {ctx.author.mention}! Steam Profile: {steam_link}, Project Zomboid Hours: {hours_played}. Staff or HeadStaff, please approve using the button below.", view=view)
+            messages_to_delete.append(approval_msg)
+            await asyncio.sleep(300)  # Wait 5 minutes
+            for msg in messages_to_delete:
+                try:
+                    await msg.delete()
+                except discord.NotFound:
+                    pass
         else:
-            await ctx.send("You did not confirm reading the rules.")
+            response = await ctx.send("You did not confirm reading the rules.")
+            messages_to_delete.append(response)
+            await asyncio.sleep(300)  # Wait 5 minutes
+            for msg in messages_to_delete:
+                try:
+                    await msg.delete()
+                except discord.NotFound:
+                    pass
     except asyncio.TimeoutError:
-        await ctx.send("You took too long to respond.")
+        response = await ctx.send("You took too long to respond.")
+        messages_to_delete.append(response)
+        await asyncio.sleep(300)  # Wait 5 minutes
+        for msg in messages_to_delete:
+            try:
+                await msg.delete()
+            except discord.NotFound:
+                pass
 
 bot.run(DISCORD_TOKEN)
