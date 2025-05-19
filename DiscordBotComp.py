@@ -19,8 +19,8 @@ class ApproveButton(discord.ui.View):
 
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.green)
     async def approve_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not any(role.name in ["Staff", "HeadStaff"] for role in interaction.user.roles):
-            await interaction.response.send_message("Only Staff or HeadStaff can approve applications.", ephemeral=True)
+        if not any(role.name in ["staff", "headstaff"] for role in interaction.user.roles):
+            await interaction.response.send_message("Only staff or headstaff can approve applications.", ephemeral=True)
             return
         try:
             user = await bot.fetch_user(self.applicant_id)
@@ -77,7 +77,7 @@ async def apply(ctx):
         messages_to_delete.append(confirm_msg)
 
         if confirm_msg.content.lower() == 'i confirm':
-            embed = discord.Embed(description=f"Application submitted for {ctx.author.mention}! **Steam Profile:** {steam_link}, **Project Zomboid Hours:** {hours_played}. Staff or HeadStaff, please approve using the button below.", color=discord.Color.green())
+            embed = discord.Embed(description=f"Application submitted for {ctx.author.mention}! **Steam Profile:** {steam_link}, **Project Zomboid Hours:** {hours_played}. staff or headstaff, please approve using the button below.", color=discord.Color.green())
             view = ApproveButton(ctx.author.id)
             approval_msg = await ctx.send(embed=embed, view=view)
             messages_to_delete.append(approval_msg)
@@ -101,7 +101,7 @@ async def apply(ctx):
         embed = discord.Embed(description="You took too long to respond.", color=discord.Color.red())
         response = await ctx.send(embed=embed)
         messages_to_delete.append(response)
-        await asyncio.sleep(60)  # Wait 5 minutes
+        await asyncio.sleep(300)  # Wait 5 minutes
         for msg in messages_to_delete:
             try:
                 await msg.delete()
