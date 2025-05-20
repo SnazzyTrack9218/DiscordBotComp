@@ -25,7 +25,6 @@ class ApproveDeclineView(discord.ui.View):
         if self.action_taken:
             await interaction.response.send_message("This application has already been processed.", ephemeral=True)
             return False
-        # Case-insensitive role check
         if not any(role.name.lower() in ["staff", "headstaff"] for role in interaction.user.roles):
             await interaction.response.send_message("Only staff or headstaff can process applications.", ephemeral=True)
             return False
@@ -34,7 +33,8 @@ class ApproveDeclineView(discord.ui.View):
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, custom_id="approve_button")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.action_taken = True
-        self.disable_all_items()
+        for item in self.children:
+            item.disabled = True
         try:
             user = await bot.fetch_user(self.applicant_id)
             guild = interaction.guild
@@ -54,7 +54,8 @@ class ApproveDeclineView(discord.ui.View):
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.red, custom_id="decline_button")
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.action_taken = True
-        self.disable_all_items()
+        for item in self.children:
+            item.disabled = True
         try:
             user = await bot.fetch_user(self.applicant_id)
             await interaction.response.edit_message(embed=discord.Embed(description=f"❌ Application for {user.mention} **declined** by {interaction.user.mention}.", color=discord.Color.red()), view=self)
