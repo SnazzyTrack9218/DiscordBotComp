@@ -96,7 +96,7 @@ async def on_member_join(member):
 
 @bot.command()
 async def apply(ctx):
-    if ctx.channel.name != 'apply':
+    if isinstance(ctx.channel, discord.DMChannel) or ctx.channel.name != 'apply':
         embed = discord.Embed(description="❗ Please use this command in the #apply channel.", color=discord.Color.red())
         await ctx.send(embed=embed, delete_after=30)
         return
