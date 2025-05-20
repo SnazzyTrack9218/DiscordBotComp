@@ -43,8 +43,11 @@ class ApproveDeclineView(discord.ui.View):
             if member:
                 member_role = discord.utils.get(guild.roles, name="member")
                 if member_role:
-                    await member.add_roles(member_role)
-                    await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! Assigned member role.\n**Steam Profile:** {self.steam_link}", color=discord.Color.green()), view=self)
+                    try:
+                        await member.add_roles(member_role)
+                        await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! Assigned member role.\n**Steam Profile:** {self.steam_link}", color=discord.Color.green()), view=self)
+                    except discord.Forbidden:
+                        await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! Failed to assign member role (bot lacks permissions).\n**Steam Profile:** {self.steam_link}", color=discord.Color.green()), view=self)
                 else:
                     await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! member role not found.\n**Steam Profile:** {self.steam_link}", color=discord.Color.green()), view=self)
             else:
@@ -60,8 +63,18 @@ class ApproveDeclineView(discord.ui.View):
         try:
             user = await bot.fetch_user(self.applicant_id)
             await interaction.response.edit_message(embed=discord.Embed(description=f"❌ Application for {user.mention} **declined** by {interaction.user.mention}.\n**Steam Profile:** {self.steam_link}", color=discord.Color.red()), view=self)
+            await asyncio.sleep(300)  # Auto-delete after 5 minutes for declined applications
+            try:
+                await interaction.message.delete()
+            except discord.NotFound:
+                pass
         except discord.NotFound:
             await interaction.response.edit_message(embed=discord.Embed(description=f"⚠️ User not found.\n**Steam Profile:** {self.steam_link}", color=discord.Color.red()), view=self)
+            await asyncio.sleep(300)  # Auto-delete after 5 minutes for declined applications
+            try:
+                await interaction.message.delete()
+            except discord.NotFound:
+                pass
 
 @bot.event
 async def on_ready():
@@ -131,15 +144,9 @@ async def apply(ctx):
 
         embed = discord.Embed(description=f"📝 **Application submitted by {ctx.author.mention}**\n\n**Steam:** {steam_link}\n**Hours:** {hours_played}\n\nStaff may approve or decline below.", color=discord.Color.green())
         view = ApproveDeclineView(applicant_id=ctx.author.id, steam_link=steam_link)
-        approval_msg = await apply_channel.send(embed=embed, view=view)
+        await apply_channel.send(embed=embed, view=view)
 
         await dm_channel.send(embed=discord.Embed(description="✅ Application submitted! You'll be notified of the decision in the #apply channel.", color=discord.Color.green()))
-
-        await asyncio.sleep(300)  # Auto-delete after 5 minutes
-        try:
-            await approval_msg.delete()
-        except discord.NotFound:
-            pass
 
     except asyncio.TimeoutError:
         await dm_channel.send(embed=discord.Embed(description="⏱️ You took too long to respond. Application timed out.", color=discord.Color.red()))
