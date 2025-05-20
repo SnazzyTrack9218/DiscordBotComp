@@ -19,33 +19,40 @@ class ApproveDeclineView(discord.ui.View):
     def __init__(self, applicant_id):
         super().__init__(timeout=None)
         self.applicant_id = applicant_id
+        self.action_taken = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.action_taken:
+            await interaction.response.send_message("This application has already been processed.", ephemeral=True)
+            return False
+        if not any(role.name.lower() in ["staff", "headstaff"] for role in interaction.user.roles):
+            await interaction.response.send_message("Only staff or headstaff can process applications.", ephemeral=True)
+            return False
+        return True
 
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, custom_id="approve_button")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not any(role.name.lower() in ["staff", "headstaff"] for role in interaction.user.roles):
-            await interaction.response.send_message("Only staff or headstaff can approve applications.", ephemeral=True)
-            return
+        self.action_taken = True
+        self.disable_all_items()
         try:
             user = await bot.fetch_user(self.applicant_id)
-            await interaction.response.send_message(f"✅ Application for {user.mention} **approved** by {interaction.user.mention}!")
+            await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}!", color=discord.Color.green()), view=self)
         except discord.NotFound:
-            await interaction.response.send_message("⚠️ User not found.", ephemeral=True)
+            await interaction.response.edit_message(embed=discord.Embed(description="⚠️ User not found.", color=discord.Color.red()), view=self)
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.red, custom_id="decline_button")
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not any(role.name.lower() in ["staff", "headstaff"] for role in interaction.user.roles):
-            await interaction.response.send_message("Only staff or headstaff can decline applications.", ephemeral=True)
-            return
+        self.action_taken = True
+        self.disable_all_items()
         try:
             user = await bot.fetch_user(self.applicant_id)
-            await interaction.response.send_message(f"❌ Application for {user.mention} **declined** by {interaction.user.mention}.")
+            await interaction.response.edit_message(embed=discord.Embed(description=f"❌ Application for {user.mention} **declined** by {interaction.user.mention}.", color=discord.Color.red()), view=self)
         except discord.NotFound:
-            await interaction.response.send_message("⚠️ User not found.", ephemeral=True)
+            await interaction.response.edit_message(embed=discord.Embed(description="⚠️ User not found.", color=discord.Color.red()), view=self)
 
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
-    # Register persistent view once
     bot.add_view(ApproveDeclineView(applicant_id=0))
 
 @bot.event
@@ -68,78 +75,60 @@ async def apply(ctx):
         await ctx.send(embed=embed, delete_after=30)
         return
 
-    messages_to_delete = [ctx.message]
+    await ctx.message.delete()
+    dm_channel = await ctx.author.create_dm()
 
-    def check(m): return m.author == ctx.author and m.channel == ctx.channel
+    def check(m): return m.author == ctx.author and m.channel == dm_channel
 
     try:
         # Ask for Steam profile
         embed = discord.Embed(description="🔗 Please provide your Steam profile link (must be a valid URL).", color=discord.Color.blue())
-        response = await ctx.send(embed=embed)
-        messages_to_delete.append(response)
+        await dm_channel.send(embed=embed)
 
         while True:
             steam_msg = await bot.wait_for('message', check=check, timeout=60.0)
-            messages_to_delete.append(steam_msg)
             steam_link = steam_msg.content.strip()
 
             if STEAM_PROFILE_REGEX.match(steam_link):
                 break
-            else:
-                warning = await ctx.send("❗ That doesn't look like a valid Steam profile link. Try again.")
-                messages_to_delete.append(warning)
+            await dm_channel.send("❗ That doesn't look like a valid Steam profile link. Try again.")
 
         # Ask for hours played
         embed = discord.Embed(description="🕒 How many hours have you played Project Zomboid?", color=discord.Color.blue())
-        response = await ctx.send(embed=embed)
-        messages_to_delete.append(response)
+        await dm_channel.send(embed=embed)
 
         hours_msg = await bot.wait_for('message', check=check, timeout=60.0)
-        messages_to_delete.append(hours_msg)
         hours_played = hours_msg.content.strip()
 
         # Ask for rule confirmation
         embed = discord.Embed(description=f"**Steam Profile:** {steam_link}\n**Zomboid Hours:** {hours_played}\n\nReply with `I confirm` to acknowledge you've read the rules.", color=discord.Color.blue())
-        response = await ctx.send(embed=embed)
-        messages_to_delete.append(response)
+        await dm_channel.send(embed=embed)
 
         confirm_msg = await bot.wait_for('message', check=check, timeout=60.0)
-        messages_to_delete.append(confirm_msg)
 
         if confirm_msg.content.lower() != 'i confirm':
-            error = discord.Embed(description="❌ You didn't confirm reading the rules. Application cancelled.", color=discord.Color.red())
-            cancel_msg = await ctx.send(embed=error)
-            messages_to_delete.append(cancel_msg)
-            await asyncio.sleep(20)
-            for msg in messages_to_delete:
-                try:
-                    await msg.delete()
-                except discord.NotFound:
-                    pass
+            await dm_channel.send(embed=discord.Embed(description="❌ You didn't confirm reading the rules. Application cancelled.", color=discord.Color.red()))
             return
 
-        # Final embed with buttons
+        # Send application to #apply channel
+        apply_channel = discord.utils.get(ctx.guild.text_channels, name='apply')
+        if not apply_channel:
+            await dm_channel.send(embed=discord.Embed(description="⚠️ Could not find #apply channel.", color=discord.Color.red()))
+            return
+
         embed = discord.Embed(description=f"📝 **Application submitted by {ctx.author.mention}**\n\n**Steam:** {steam_link}\n**Hours:** {hours_played}\n\nStaff may approve or decline below.", color=discord.Color.green())
         view = ApproveDeclineView(applicant_id=ctx.author.id)
-        approval_msg = await ctx.send(embed=embed, view=view)
-        messages_to_delete.append(approval_msg)
+        approval_msg = await apply_channel.send(embed=embed, view=view)
 
-        await asyncio.sleep(300)
-        for msg in messages_to_delete:
-            try:
-                await msg.delete()
-            except discord.NotFound:
-                pass
+        await dm_channel.send(embed=discord.Embed(description="✅ Application submitted! You'll be notified of the decision in the #apply channel.", color=discord.Color.green()))
+
+        await asyncio.sleep(300)  # Auto-delete after 5 minutes
+        try:
+            await approval_msg.delete()
+        except discord.NotFound:
+            pass
 
     except asyncio.TimeoutError:
-        timeout = discord.Embed(description="⏱️ You took too long to respond. Application timed out.", color=discord.Color.red())
-        timeout_msg = await ctx.send(embed=timeout)
-        messages_to_delete.append(timeout_msg)
-        await asyncio.sleep(30)
-        for msg in messages_to_delete:
-            try:
-                await msg.delete()
-            except discord.NotFound:
-                pass
+        await dm_channel.send(embed=discord.Embed(description="⏱️ You took too long to respond. Application timed out.", color=discord.Color.red()))
 
 bot.run(DISCORD_TOKEN)
