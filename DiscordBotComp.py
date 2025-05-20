@@ -13,7 +13,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # Replace with your bot token
 DISCORD_TOKEN = 'YOUR_DISCORD_TOKEN'
 
-STEAM_PROFILE_REGEX = re.compile(r'https?://steamcommunity\.com/(id|profiles)/[a-zA-Z0-9_-]+/?')
+STEAM_PROFILE_REGEX = re.compile(r'https?://steam-community\.com/(id|profiles)/[a-zA-Z0-9_-]+/?')
 
 class ApproveDeclineView(discord.ui.View):
     def __init__(self, applicant_id):
@@ -40,12 +40,12 @@ class ApproveDeclineView(discord.ui.View):
             guild = interaction.guild
             member = guild.get_member(self.applicant_id)
             if member:
-                member_role = discord.utils.get(guild.roles, name="Member")
+                member_role = discord.utils.get(guild.roles, name="member")
                 if member_role:
                     await member.add_roles(member_role)
-                    await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! Assigned Member role.", color=discord.Color.green()), view=self)
+                    await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! Assigned member role.", color=discord.Color.green()), view=self)
                 else:
-                    await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! Member role not found.", color=discord.Color.green()), view=self)
+                    await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! member role not found.", color=discord.Color.green()), view=self)
             else:
                 await interaction.response.edit_message(embed=discord.Embed(description="⚠️ Member not found in guild.", color=discord.Color.red()), view=self)
         except discord.NotFound:
