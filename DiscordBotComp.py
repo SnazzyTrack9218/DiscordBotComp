@@ -13,12 +13,13 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # Replace with your bot token
 DISCORD_TOKEN = 'YOUR_DISCORD_TOKEN'
 
-STEAM_PROFILE_REGEX = re.compile(r'https?://steam-community\.com/(id|profiles)/[a-zA-Z0-9_-]+/?')
+STEAM_PROFILE_REGEX = re.compile(r'https?://steamcommunity\.com/(id|profiles)/[a-zA-Z0-9_-]+/?')
 
 class ApproveDeclineView(discord.ui.View):
-    def __init__(self, applicant_id):
+    def __init__(self, applicant_id, steam_link):
         super().__init__(timeout=None)
         self.applicant_id = applicant_id
+        self.steam_link = steam_link
         self.action_taken = False
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -43,13 +44,13 @@ class ApproveDeclineView(discord.ui.View):
                 member_role = discord.utils.get(guild.roles, name="member")
                 if member_role:
                     await member.add_roles(member_role)
-                    await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! Assigned member role.", color=discord.Color.green()), view=self)
+                    await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! Assigned member role.\n**Steam Profile:** {self.steam_link}", color=discord.Color.green()), view=self)
                 else:
-                    await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! member role not found.", color=discord.Color.green()), view=self)
+                    await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! member role not found.\n**Steam Profile:** {self.steam_link}", color=discord.Color.green()), view=self)
             else:
-                await interaction.response.edit_message(embed=discord.Embed(description="⚠️ Member not found in guild.", color=discord.Color.red()), view=self)
+                await interaction.response.edit_message(embed=discord.Embed(description=f"⚠️ Member not found in guild.\n**Steam Profile:** {self.steam_link}", color=discord.Color.red()), view=self)
         except discord.NotFound:
-            await interaction.response.edit_message(embed=discord.Embed(description="⚠️ User not found.", color=discord.Color.red()), view=self)
+            await interaction.response.edit_message(embed=discord.Embed(description=f"⚠️ User not found.\n**Steam Profile:** {self.steam_link}", color=discord.Color.red()), view=self)
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.red, custom_id="decline_button")
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -58,14 +59,14 @@ class ApproveDeclineView(discord.ui.View):
             item.disabled = True
         try:
             user = await bot.fetch_user(self.applicant_id)
-            await interaction.response.edit_message(embed=discord.Embed(description=f"❌ Application for {user.mention} **declined** by {interaction.user.mention}.", color=discord.Color.red()), view=self)
+            await interaction.response.edit_message(embed=discord.Embed(description=f"❌ Application for {user.mention} **declined** by {interaction.user.mention}.\n**Steam Profile:** {self.steam_link}", color=discord.Color.red()), view=self)
         except discord.NotFound:
-            await interaction.response.edit_message(embed=discord.Embed(description="⚠️ User not found.", color=discord.Color.red()), view=self)
+            await interaction.response.edit_message(embed=discord.Embed(description=f"⚠️ User not found.\n**Steam Profile:** {self.steam_link}", color=discord.Color.red()), view=self)
 
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
-    bot.add_view(ApproveDeclineView(applicant_id=0))
+    bot.add_view(ApproveDeclineView(applicant_id=0, steam_link=""))
 
 @bot.event
 async def on_member_join(member):
@@ -129,7 +130,7 @@ async def apply(ctx):
             return
 
         embed = discord.Embed(description=f"📝 **Application submitted by {ctx.author.mention}**\n\n**Steam:** {steam_link}\n**Hours:** {hours_played}\n\nStaff may approve or decline below.", color=discord.Color.green())
-        view = ApproveDeclineView(applicant_id=ctx.author.id)
+        view = ApproveDeclineView(applicant_id=ctx.author.id, steam_link=steam_link)
         approval_msg = await apply_channel.send(embed=embed, view=view)
 
         await dm_channel.send(embed=discord.Embed(description="✅ Application submitted! You'll be notified of the decision in the #apply channel.", color=discord.Color.green()))
