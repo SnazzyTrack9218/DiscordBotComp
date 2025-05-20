@@ -25,6 +25,7 @@ class ApproveDeclineView(discord.ui.View):
         if self.action_taken:
             await interaction.response.send_message("This application has already been processed.", ephemeral=True)
             return False
+        # Case-insensitive role check
         if not any(role.name.lower() in ["staff", "headstaff"] for role in interaction.user.roles):
             await interaction.response.send_message("Only staff or headstaff can process applications.", ephemeral=True)
             return False
@@ -36,7 +37,17 @@ class ApproveDeclineView(discord.ui.View):
         self.disable_all_items()
         try:
             user = await bot.fetch_user(self.applicant_id)
-            await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}!", color=discord.Color.green()), view=self)
+            guild = interaction.guild
+            member = guild.get_member(self.applicant_id)
+            if member:
+                member_role = discord.utils.get(guild.roles, name="Member")
+                if member_role:
+                    await member.add_roles(member_role)
+                    await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! Assigned Member role.", color=discord.Color.green()), view=self)
+                else:
+                    await interaction.response.edit_message(embed=discord.Embed(description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}! Member role not found.", color=discord.Color.green()), view=self)
+            else:
+                await interaction.response.edit_message(embed=discord.Embed(description="⚠️ Member not found in guild.", color=discord.Color.red()), view=self)
         except discord.NotFound:
             await interaction.response.edit_message(embed=discord.Embed(description="⚠️ User not found.", color=discord.Color.red()), view=self)
 
