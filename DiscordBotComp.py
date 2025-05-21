@@ -858,6 +858,7 @@ async def clear_applications(ctx: commands.Context, status: str = "none") -> Non
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
+    # Safely get command name
     cmd_name = ctx.command.name if ctx.command else "unknown"
     logger.error(f"Command error: {error}, Command: {cmd_name}, Message: {ctx.message.content}, Channel: {ctx.channel.id}")
     
