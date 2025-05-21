@@ -1,4 +1,4 @@
-```python
+python
 import discord
 from discord.ext import commands
 import asyncio
@@ -866,4 +866,3 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
-```
