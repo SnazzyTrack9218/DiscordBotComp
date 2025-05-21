@@ -304,9 +304,10 @@ async def on_member_join(member: discord.Member) -> None:
         )
     
     await channel.send(embed=embed)
-
+    
 @bot.command()
 async def apply(ctx: commands.Context) -> None:
+    logger.info(f"Apply command invoked by {ctx.author.id} in channel {ctx.channel.id}")
     apply_channel = discord.utils.get(ctx.guild.text_channels, name=config["apply_channel"])
     if not apply_channel or not apply_channel.permissions_for(ctx.guild.me).send_messages:
         embed = discord.Embed(
@@ -314,15 +315,17 @@ async def apply(ctx: commands.Context) -> None:
             color=discord.Color.red()
         )
         await ctx.send(embed=embed, delete_after=30)
+        await ctx.message.delete()
         return
 
-    if isinstance(ctx.channel, discord.DMChannel) or ctx.channel.name != config["apply_channel"]:
+    if isinstance(ctx.channel, discord.DMChannel) or ctx.channel != apply_channel:
         channel_ref = apply_channel.mention if apply_channel else f"#{config['apply_channel']}"
         embed = discord.Embed(
             description=f"❗ Please use this command in {channel_ref}.",
             color=discord.Color.red()
         )
         await ctx.send(embed=embed, delete_after=30)
+        await ctx.message.delete()
         return
 
     user_id = str(ctx.author.id)
@@ -535,7 +538,7 @@ async def apply(ctx: commands.Context) -> None:
             color=discord.Color.red()
         ))
     except Exception as e:
-        logger.error(f"Error in application process: {e}")
+        logger.error(f"Error in apply command for user {ctx.author.id}: {e}")
         await dm_channel.send(embed=discord.Embed(
             title="⚠️ Error",
             description="Something went wrong. Try again later or contact staff.",
