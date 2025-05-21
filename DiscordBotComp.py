@@ -76,6 +76,8 @@ class ApproveDeclineView(discord.ui.View):
         self.applicant_id = applicant_id
         self.application_data = application_data
         self.action_taken = False
+        # Set a unique custom_id for persistence
+        self.custom_id = f"approve_decline_{applicant_id}"
 
     async def interaction_check(self, interaction):
         if self.action_taken:
@@ -139,6 +141,7 @@ class ApproveDeclineView(discord.ui.View):
             await interaction.response.edit_message(embed=result_embed, view=self)
             
         except Exception as e:
+            print(f"Error in approve button: {str(e)}")  # Debug log
             await interaction.response.edit_message(
                 embed=discord.Embed(description=f"⚠️ Error processing application: {str(e)}", color=discord.Color.red()),
                 view=self
@@ -158,6 +161,7 @@ class ApproveDeclineView(discord.ui.View):
             await interaction.response.send_modal(modal)
             
         except Exception as e:
+            print(f"Error in decline button: {str(e)}")  # Debug log
             await interaction.response.edit_message(
                 embed=discord.Embed(description=f"⚠️ Error processing application: {str(e)}", color=discord.Color.red()),
                 view=self
@@ -235,6 +239,7 @@ class DeclineReasonModal(discord.ui.Modal, title="Decline Application"):
                 pass
                 
         except Exception as e:
+            print(f"Error in decline modal: {str(e)}")  # Debug log
             await interaction.response.send_message(
                 f"⚠️ Error processing application: {str(e)}", 
                 ephemeral=True
@@ -244,10 +249,6 @@ class DeclineReasonModal(discord.ui.Modal, title="Decline Application"):
 async def on_ready():
     print(f'{bot.user} is connected to Discord!')
     load_applications()
-    
-    # Register views for persistent buttons
-    bot.add_view(ApproveDeclineView("0", {}))
-    
     # Set custom status
     await bot.change_presence(activity=discord.Game(name="Project Zomboid"))
 
@@ -406,7 +407,17 @@ async def apply(ctx):
             app_embed.set_footer(text=f"User ID: {ctx.author.id}")
             
             view = ApproveDeclineView(ctx.author.id, application_data)
-            await apply_channel.send(embed=app_embed, view=view)
+            try:
+                await apply_channel.send(embed=app_embed, view=view)
+            except Exception as e:
+                print(f"Error sending application message: {str(e)}")  # Debug log
+                await dm_channel.send(
+                    embed=discord.Embed(
+                        description="⚠️ Error: Could not send application to staff channel. Please contact an admin.",
+                        color=discord.Color.red()
+                    )
+                )
+                return
             
             # Notify user of submission
             await dm_channel.send(
@@ -435,6 +446,89 @@ async def apply(ctx):
         await ctx.send(
             f"{ctx.author.mention}, I couldn't send you a DM. Please enable DMs from server members and try again.",
             delete_after=15
+        )
+    except Exception as e:
+        print(f"Error in apply command: {str(e)}")  # Debug log
+        await ctx.author.send(
+            embed=discord.Embed(
+                description=f"⚠️ An error occurred: {str(e)}. Please try again or contact an admin.",
+                color=discord.Color.red()
+            )
+        )
+
+@bot.command()
+@commands.check(has_staff_role)
+async def approve(ctx, member: discord.Member):
+    """Approve a member's application"""
+    user_id = str(member.id)
+    
+    if user_id not in applications or applications[user_id]["status"] != "pending":
+        await ctx.send(
+            embed=discord.Embed(
+                description=f"❗ No pending application found for {member.mention}.",
+                color=discord.Color.red()
+            )
+        )
+        return
+    
+    application_data = applications[user_id]
+    
+    try:
+        guild = ctx.guild
+        member_role = discord.utils.get(guild.roles, name=config["member_role"])
+        
+        result_embed = discord.Embed(
+            description=f"✅ Application for {member.mention} **approved** by {ctx.author.mention}!",
+            color=discord.Color.green()
+        )
+        result_embed.add_field(name="Steam Profile", value=application_data["steam_link"], inline=True)
+        result_embed.add_field(name="Hours Played", value=application_data["hours_played"], inline=True)
+        
+        if member_role:
+            try:
+                await member.add_roles(member_role)
+                result_embed.add_field(name="Role", value=f"Assigned {member_role.mention}", inline=False)
+            except discord.Forbidden:
+                result_embed.add_field(name="Role", value="Failed to assign role (missing permissions)", inline=False)
+        else:
+            result_embed.add_field(name="Role", value=f"Role '{config['member_role']}' not found", inline=False)
+        
+        # Notify the user via DM
+        try:
+            await member.send(embed=discord.Embed(
+                title="Application Approved!",
+                description="Your application to join our Project Zomboid server has been approved! Welcome to the community!",
+                color=discord.Color.green()
+            ))
+        except discord.Forbidden:
+            result_embed.add_field(name="Note", value="Could not DM user about approval", inline=False)
+        
+        # Update application status
+        applications[user_id]["status"] = "approved"
+        applications[user_id]["processed_by"] = str(ctx.author.id)
+        applications[user_id]["processed_at"] = datetime.now().isoformat()
+        save_applications()
+        
+        await ctx.send(embed=result_embed)
+        
+        # Find and disable buttons in the application message
+        apply_channel = discord.utils.get(guild.text_channels, name=config["apply_channel"])
+        if apply_channel:
+            async for message in apply_channel.history(limit=100):
+                if message.embeds and "Application submitted by" in message.embeds[0].description and str(member.id) in message.embeds[0].footer.text:
+                    view = ApproveDeclineView(member.id, application_data)
+                    for item in view.children:
+                        item.disabled = True
+                    await message.edit(embed=message.embeds[0], view=view)
+                    break
+        
+    except Exception as e:
+        print(f"Error in approve command: {str(e)}")  # Debug log
+        await ctx.send(
+            embed=discord.Embed(
+                description=f"⚠️ Error processing application: {str(e)}",
+                color=discord.Color.red()
+            )
         )
 
 @bot.command()
