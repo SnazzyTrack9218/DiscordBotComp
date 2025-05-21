@@ -762,10 +762,10 @@ async def help(ctx: commands.Context, command: Optional[str] = None) -> None:
             return
         embed = discord.Embed(
             title=f"Help: !{cmd.name}",
-            description=cmd.help or "No description available.",
+            description=getattr(cmd, 'help', None) or "No description available.",
             color=discord.Color.blue()
         )
-        if cmd.signature:
+        if hasattr(cmd, 'signature'):
             embed.add_field(name="Usage", value=f"!{cmd.name} {cmd.signature}", inline=False)
         await ctx.send(embed=embed, delete_after=30)
         return
@@ -781,20 +781,20 @@ async def help(ctx: commands.Context, command: Optional[str] = None) -> None:
     public_cmds = []
     for cmd in bot.commands:
         if not cmd.checks:  # Public commands have no checks
-            public_cmds.append(f"**!{cmd.name}** - {cmd.help or 'No description'}")
+            public_cmds.append(f"**!{cmd.name}** - {getattr(cmd, 'help', None) or 'No description'}")
     if public_cmds:
         embed.add_field(name="📝 Public Commands", value="\n".join(public_cmds), inline=False)
     
     if is_staff:
         staff_cmds = []
         for cmd in bot.commands:
-            if cmd.checks:
+            if hasattr(cmd, 'checks') and cmd.checks:
                 requires_admin = any(
                     isinstance(check, commands.has_permissions) and check.kwargs.get('administrator', False)
                     for check in cmd.checks
                 )
-                if not cmd.hidden and (not requires_admin or is_admin):
-                    staff_cmds.append(f"**!{cmd.name}** - {cmd.help or 'No description'}")
+                if not getattr(cmd, 'hidden', False) and (not requires_admin or is_admin):
+                    staff_cmds.append(f"**!{cmd.name}** - {getattr(cmd, 'help', None) or 'No description'}")
         if staff_cmds:
             embed.add_field(name="🛡️ Staff Commands", value="\n".join(staff_cmds), inline=False)
     
