@@ -15,7 +15,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 CONFIG_FILE = 'config.json'
 STEAM_PROFILE_REGEX = re.compile(r'https?://steamcommunity\.com/(id|profiles)/[a-zA-Z0-9_-]+/?')
 DEFAULT_CONFIG = {
-    "staff_roles": ["staff", "headstaff", "admin"],
+    "staff_roles": ["staff", "headstaff"],  # Updated to specified roles
     "member_role": "member",
     "apply_channel": "apply",
     "application_cooldown": 86400,  # 24 hours in seconds
@@ -58,7 +58,6 @@ def load_applications():
     if os.path.exists('applications.json'):
         with open('applications.json', 'r') as f:
             applications = json.load(f)
-        # Ensure all applications have required keys
         for uid, app in applications.items():
             app.setdefault("status", "pending")
             app.setdefault("steam_link", "N/A")
@@ -66,8 +65,9 @@ def load_applications():
             app.setdefault("submitted_at", datetime.now().isoformat())
         save_applications()
 
-def has_staff_role(member):
-    """Check if member has staff role"""
+def has_staff_role(member_or_ctx):
+    """Check if a member or context author has a staff role"""
+    member = member_or_ctx if isinstance(member_or_ctx, discord.Member) else member_or_ctx.author
     return any(role.name.lower() in config["staff_roles"] for role in member.roles)
 
 class ApproveDeclineView(discord.ui.View):
@@ -76,7 +76,6 @@ class ApproveDeclineView(discord.ui.View):
         self.applicant_id = applicant_id
         self.application_data = application_data
         self.action_taken = False
-        # Set a unique custom_id for persistence
         self.custom_id = f"approve_decline_{applicant_id}"
 
     async def interaction_check(self, interaction):
@@ -103,13 +102,10 @@ class ApproveDeclineView(discord.ui.View):
                 description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}!", 
                 color=discord.Color.green()
             )
-            
-            # Add application data to embed
             result_embed.add_field(name="Steam Profile", value=self.application_data["steam_link"], inline=True)
             result_embed.add_field(name="Hours Played", value=self.application_data["hours_played"], inline=True)
             
             if member:
-                # Assign member role
                 member_role = discord.utils.get(guild.roles, name=config["member_role"])
                 if member_role:
                     try:
@@ -120,7 +116,6 @@ class ApproveDeclineView(discord.ui.View):
                 else:
                     result_embed.add_field(name="Role", value=f"Role '{config['member_role']}' not found", inline=False)
                 
-                # Notify the user via DM
                 try:
                     await member.send(embed=discord.Embed(
                         title="Application Approved!",
@@ -132,7 +127,6 @@ class ApproveDeclineView(discord.ui.View):
             else:
                 result_embed.add_field(name="Error", value="Member not found in server", inline=False)
                 
-            # Update application status
             applications[str(self.applicant_id)]["status"] = "approved"
             applications[str(self.applicant_id)]["processed_by"] = str(interaction.user.id)
             applications[str(self.applicant_id)]["processed_at"] = datetime.now().isoformat()
@@ -141,7 +135,7 @@ class ApproveDeclineView(discord.ui.View):
             await interaction.response.edit_message(embed=result_embed, view=self)
             
         except Exception as e:
-            print(f"Error in approve button: {str(e)}")  # Debug log
+            print(f"Error in approve button: {str(e)}")
             await interaction.response.edit_message(
                 embed=discord.Embed(description=f"⚠️ Error processing application: {str(e)}", color=discord.Color.red()),
                 view=self
@@ -155,13 +149,11 @@ class ApproveDeclineView(discord.ui.View):
             
         try:
             user = await bot.fetch_user(self.applicant_id)
-            
-            # Create reason modal
             modal = DeclineReasonModal(self.applicant_id, self.application_data)
             await interaction.response.send_modal(modal)
             
         except Exception as e:
-            print(f"Error in decline button: {str(e)}")  # Debug log
+            print(f"Error in decline button: {str(e)}")
             await interaction.response.edit_message(
                 embed=discord.Embed(description=f"⚠️ Error processing application: {str(e)}", color=discord.Color.red()),
                 view=self
@@ -193,14 +185,11 @@ class DeclineReasonModal(discord.ui.Modal, title="Decline Application"):
                 description=f"❌ Application for {user.mention} **declined** by {interaction.user.mention}", 
                 color=discord.Color.red()
             )
-            
-            # Add application data to embed
             result_embed.add_field(name="Steam Profile", value=self.application_data["steam_link"], inline=True)
             result_embed.add_field(name="Hours Played", value=self.application_data["hours_played"], inline=True)
             result_embed.add_field(name="Reason", value=reason_text, inline=False)
             
             if member:
-                # Notify the user via DM
                 try:
                     dm_embed = discord.Embed(
                         title="Application Status",
@@ -215,7 +204,6 @@ class DeclineReasonModal(discord.ui.Modal, title="Decline Application"):
                 except discord.Forbidden:
                     result_embed.add_field(name="Note", value="Could not DM user about decline", inline=False)
             
-            # Update application status
             applications[str(self.applicant_id)]["status"] = "declined"
             applications[str(self.applicant_id)]["reason"] = reason_text
             applications[str(self.applicant_id)]["processed_by"] = str(interaction.user.id)
@@ -224,22 +212,19 @@ class DeclineReasonModal(discord.ui.Modal, title="Decline Application"):
             
             await interaction.response.send_message(embed=result_embed, ephemeral=True)
             
-            # Edit the original message
             view = ApproveDeclineView(self.applicant_id, self.application_data)
             for item in view.children:
                 item.disabled = True
-                
             await interaction.message.edit(embed=result_embed, view=view)
             
-            # Schedule deletion
-            await asyncio.sleep(300)  # 5 minutes
+            await asyncio.sleep(300)
             try:
                 await interaction.message.delete()
             except discord.NotFound:
                 pass
                 
         except Exception as e:
-            print(f"Error in decline modal: {str(e)}")  # Debug log
+            print(f"Error in decline modal: {str(e)}")
             await interaction.response.send_message(
                 f"⚠️ Error processing application: {str(e)}", 
                 ephemeral=True
@@ -249,7 +234,6 @@ class DeclineReasonModal(discord.ui.Modal, title="Decline Application"):
 async def on_ready():
     print(f'{bot.user} is connected to Discord!')
     load_applications()
-    # Set custom status
     await bot.change_presence(activity=discord.Game(name="Project Zomboid"))
 
 @bot.event
@@ -259,22 +243,18 @@ async def on_member_join(member):
         description="Thanks for joining our Project Zomboid server community!",
         color=discord.Color.blue()
     )
-    
-    # Add member details
     embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
     account_age = (datetime.now(tz=member.created_at.tzinfo) - member.created_at).days
     embed.add_field(name="Account Age", value=f"{account_age} days" if account_age < 365 else f"{account_age // 365} years", inline=True)
     embed.add_field(name="Joined", value=f"<t:{int(datetime.now().timestamp())}:R>", inline=True)
     embed.set_footer(text=f"Please use the !apply command in the #{config['apply_channel']} channel to join.")
     
-    # Find channel to send welcome message
     channel = member.guild.system_channel or discord.utils.get(member.guild.text_channels, name="welcome")
     if channel and channel.permissions_for(member.guild.me).send_messages:
         await channel.send(embed=embed)
 
 @bot.command()
 async def apply(ctx):
-    # Check if command is used in the correct channel
     if ctx.channel.name != config["apply_channel"]:
         await ctx.send(
             embed=discord.Embed(
@@ -285,13 +265,11 @@ async def apply(ctx):
         )
         return
     
-    # Delete the command message
     try:
         await ctx.message.delete()
     except (discord.Forbidden, discord.NotFound):
         pass
     
-    # Check if user has a pending application
     user_id = str(ctx.author.id)
     if user_id in applications and applications[user_id]["status"] == "pending":
         await ctx.author.send(
@@ -302,16 +280,13 @@ async def apply(ctx):
         )
         return
     
-    # Check cooldown for declined applications
     if user_id in applications and applications[user_id]["status"] == "declined":
         declined_time = datetime.fromisoformat(applications[user_id]["processed_at"])
         elapsed_seconds = (datetime.now() - declined_time).total_seconds()
-        
         if elapsed_seconds < config["application_cooldown"]:
             time_left = config["application_cooldown"] - elapsed_seconds
             hours_left = int(time_left // 3600)
             minutes_left = int((time_left % 3600) // 60)
-            
             await ctx.author.send(
                 embed=discord.Embed(
                     description=f"❗ Your previous application was declined. You can apply again in {hours_left}h {minutes_left}m.",
@@ -320,14 +295,12 @@ async def apply(ctx):
             )
             return
     
-    # Start application process in DMs
     try:
         dm_channel = await ctx.author.create_dm()
         
         def check(m):
             return m.author == ctx.author and m.channel == dm_channel
         
-        # Ask for Steam profile
         await dm_channel.send(
             embed=discord.Embed(
                 title="Project Zomboid Server Application",
@@ -339,7 +312,6 @@ async def apply(ctx):
         while True:
             steam_msg = await bot.wait_for('message', check=check, timeout=300.0)
             steam_link = steam_msg.content.strip()
-            
             if STEAM_PROFILE_REGEX.match(steam_link):
                 break
             await dm_channel.send(
@@ -349,7 +321,6 @@ async def apply(ctx):
                 )
             )
         
-        # Ask for hours played
         await dm_channel.send(
             embed=discord.Embed(
                 description="🕒 How many hours have you played Project Zomboid?",
@@ -360,7 +331,6 @@ async def apply(ctx):
         hours_msg = await bot.wait_for('message', check=check, timeout=300.0)
         hours_played = hours_msg.content.strip()
         
-        # Ask for rule confirmation
         rules_embed = discord.Embed(
             title="Application Summary",
             description="Please review your application and confirm you've read our server rules.",
@@ -382,7 +352,6 @@ async def apply(ctx):
             )
             return
         
-        # Save application data
         application_data = {
             "steam_link": steam_link,
             "hours_played": hours_played,
@@ -393,7 +362,6 @@ async def apply(ctx):
         applications[user_id] = application_data
         save_applications()
         
-        # Send application to staff
         apply_channel = discord.utils.get(ctx.guild.text_channels, name=config["apply_channel"])
         if apply_channel:
             app_embed = discord.Embed(
@@ -410,7 +378,7 @@ async def apply(ctx):
             try:
                 await apply_channel.send(embed=app_embed, view=view)
             except Exception as e:
-                print(f"Error sending application message: {str(e)}")  # Debug log
+                print(f"Error sending application message: {str(e)}")
                 await dm_channel.send(
                     embed=discord.Embed(
                         description="⚠️ Error: Could not send application to staff channel. Please contact an admin.",
@@ -419,7 +387,6 @@ async def apply(ctx):
                 )
                 return
             
-            # Notify user of submission
             await dm_channel.send(
                 embed=discord.Embed(
                     title="Application Submitted",
@@ -448,7 +415,7 @@ async def apply(ctx):
             delete_after=15
         )
     except Exception as e:
-        print(f"Error in apply command: {str(e)}")  # Debug log
+        print(f"Error in apply command: {str(e)}")
         await ctx.author.send(
             embed=discord.Embed(
                 description=f"⚠️ An error occurred: {str(e)}. Please try again or contact an admin.",
@@ -493,7 +460,6 @@ async def approve(ctx, member: discord.Member):
         else:
             result_embed.add_field(name="Role", value=f"Role '{config['member_role']}' not found", inline=False)
         
-        # Notify the user via DM
         try:
             await member.send(embed=discord.Embed(
                 title="Application Approved!",
@@ -503,7 +469,6 @@ async def approve(ctx, member: discord.Member):
         except discord.Forbidden:
             result_embed.add_field(name="Note", value="Could not DM user about approval", inline=False)
         
-        # Update application status
         applications[user_id]["status"] = "approved"
         applications[user_id]["processed_by"] = str(ctx.author.id)
         applications[user_id]["processed_at"] = datetime.now().isoformat()
@@ -511,7 +476,6 @@ async def approve(ctx, member: discord.Member):
         
         await ctx.send(embed=result_embed)
         
-        # Find and disable buttons in the application message
         apply_channel = discord.utils.get(guild.text_channels, name=config["apply_channel"])
         if apply_channel:
             async for message in apply_channel.history(limit=100):
@@ -523,7 +487,7 @@ async def approve(ctx, member: discord.Member):
                     break
         
     except Exception as e:
-        print(f"Error in approve command: {str(e)}")  # Debug log
+        print(f"Error in approve command: {str(e)}")
         await ctx.send(
             embed=discord.Embed(
                 description=f"⚠️ Error processing application: {str(e)}",
@@ -532,41 +496,9 @@ async def approve(ctx, member: discord.Member):
         )
 
 @bot.command()
-@commands.has_permissions(administrator=True)
-async def config_set(ctx, setting: str, *, value: str):
-    """Change a bot configuration setting"""
-    if setting not in config:
-        await ctx.send(f"Unknown setting: {setting}. Available settings: {', '.join(config.keys())}")
-        return
-        
-    # Handle special cases
-    if setting == "staff_roles":
-        config[setting] = [role.strip() for role in value.split(',')]
-    elif setting == "application_cooldown":
-        try:
-            config[setting] = int(value)
-        except ValueError:
-            await ctx.send("Cooldown must be a number in seconds.")
-            return
-    elif setting == "min_hours":
-        try:
-            config[setting] = int(value)
-        except ValueError:
-            await ctx.send("Minimum hours must be a number.")
-            return
-    else:
-        config[setting] = value
-        
-    save_config(config)
-    await ctx.send(f"✅ Updated {setting} to: {config[setting]}")
-
-@bot.command()
+@commands.check(has_staff_role)
 async def applications(ctx, status: str = "pending"):
     """View applications with the specified status"""
-    if not has_staff_role(ctx.author):
-        await ctx.send("You don't have permission to use this command.")
-        return
-        
     if status not in ["pending", "approved", "declined", "all"]:
         await ctx.send("Invalid status. Use: pending, approved, declined, or all")
         return
@@ -604,6 +536,34 @@ async def applications(ctx, status: str = "pending"):
         )
     
     await ctx.send(embed=embed)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def config_set(ctx, setting: str, *, value: str):
+    """Change a bot configuration setting"""
+    if setting not in config:
+        await ctx.send(f"Unknown setting: {setting}. Available settings: {', '.join(config.keys())}")
+        return
+        
+    if setting == "staff_roles":
+        config[setting] = [role.strip() for role in value.split(',')]
+    elif setting == "application_cooldown":
+        try:
+            config[setting] = int(value)
+        except ValueError:
+            await ctx.send("Cooldown must be a number in seconds.")
+            return
+    elif setting == "min_hours":
+        try:
+            config[setting] = int(value)
+        except ValueError:
+            await ctx.send("Minimum hours must be a number.")
+            return
+    else:
+        config[setting] = value
+        
+    save_config(config)
+    await ctx.send(f"✅ Updated {setting} to: {config[setting]}")
 
 # Run the bot
 if __name__ == "__main__":
