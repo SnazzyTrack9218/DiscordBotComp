@@ -471,21 +471,22 @@ async def applications(ctx, status: str = "pending"):
         await ctx.send("Invalid status. Use: pending, approved, declined, or all")
         return
         
-    filtered_apps = {uid: app for uid, app in applications.items() 
-                    if status == "all" or app["status"] == status}
+    filtered_apps = {
+        uid: app for uid, app in applications.items()
+        if "status" in app and (status == "all" or app["status"] == status)
+    }
     
     if not filtered_apps:
         await ctx.send(f"No {status} applications found.")
         return
         
-    # Create paginated embeds (simplified for brevity)
     embed = discord.Embed(
         title=f"{status.capitalize()} Applications",
         description=f"Found {len(filtered_apps)} application(s)",
         color=discord.Color.blue()
     )
     
-    for i, (uid, app) in enumerate(list(filtered_apps.items())[:10]):  # Show first 10
+    for i, (uid, app) in enumerate(list(filtered_apps.items())[:10]):
         try:
             user = await bot.fetch_user(int(uid))
             username = user.name
@@ -494,7 +495,11 @@ async def applications(ctx, status: str = "pending"):
             
         embed.add_field(
             name=f"{i+1}. {username}",
-            value=f"Steam: {app['steam_link'][:30]}...\nHours: {app['hours_played']}\nSubmitted: <t:{int(datetime.fromisoformat(app['submitted_at']).timestamp())}:R>",
+            value=(
+                f"Steam: {app.get('steam_link', 'N/A')[:30]}...\n"
+                f"Hours: {app.get('hours_played', 'N/A')}\n"
+                f"Submitted: <t:{int(datetime.fromisoformat(app.get('submitted_at', datetime.now().isoformat())).timestamp())}:R>"
+            ),
             inline=False
         )
     
