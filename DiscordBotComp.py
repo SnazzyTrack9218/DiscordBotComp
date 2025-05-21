@@ -856,27 +856,5 @@ async def clear_applications(ctx: commands.Context, status: str = "none") -> Non
     except asyncio.TimeoutError:
         await ctx.send("Operation timed out.")
 
-@bot.event
-async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
-    # Safely get command name
-    cmd_name = ctx.command.name if ctx.command else "unknown"
-    logger.error(f"Command error: {error}, Command: {cmd_name}, Message: {ctx.message.content}, Channel: {ctx.channel.id}")
-    
-    if isinstance(error, commands.CommandNotFound):
-        return  # Ignore unknown commands
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"❗ Missing argument: {error.param.name}. Use `!help {cmd_name}` for usage.", delete_after=30)
-    elif isinstance(error, commands.BadArgument):
-        await ctx.send(f"❗ Invalid argument. Use `!help {cmd_name}` for usage.", delete_after=30)
-    elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("❗ You don't have permission to use this command.", delete_after=30)
-    elif isinstance(error, commands.BotMissingPermissions):
-        await ctx.send("❗ I lack the required permissions.", delete_after=30)
-    elif isinstance(error, commands.CommandOnCooldown):
-        await ctx.send(f"⏱️ Command on cooldown. Try again in {error.retry_after:.1f} seconds.", delete_after=30)
-    else:
-        logger.error(f"Unexpected error in command '{cmd_name}': {error}, Type: {type(error).__name__}")
-        await ctx.send("❗ An unexpected error occurred. Try again later or contact staff.", delete_after=30)
-
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
