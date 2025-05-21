@@ -851,25 +851,264 @@ async def clear_applications(ctx: commands.Context, status: str = "none") -> Non
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
+    cmd_name = ctx.command.name if ctx.command else "unknown"
+    logger.error(f"Command error: {error}, Command: {cmd_name}, Message: {ctx.message.content}, Channel: {ctx.channel.id}")
+    
     if isinstance(error, commands.CommandNotFound):
-        await ctx.send("❗ Command not found. Use `!help` for available commands.")
-        return
+        return  # Ignore unknown commands
     elif isinstance(error, commands.MissingRequiredArgument):
-        cmd_name = getattr(ctx.command, 'name', 'unknown')
-        await ctx.send(f"❗ Missing argument: {error.param.name}. Use `!help {cmd_name}` for usage.")
+        await ctx.send(f"❗ Missing argument: {error.param.name}. Use `!help {cmd_name}` for usage.", delete_after=30)
     elif isinstance(error, commands.BadArgument):
-        cmd_name = getattr(ctx.command, 'name', 'unknown')
-        await ctx.send(f"❗ Invalid argument. Use `!help {cmd_name}` for usage.")
+        await ctx.send(f"❗ Invalid argument. Use `!help {cmd_name}` for usage.", delete_after=30)
     elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("❗ You don't have permission to use this command.")
+        await ctx.send("❗ You don't have permission to use this command.", delete_after=30)
     elif isinstance(error, commands.BotMissingPermissions):
-        await ctx.send("❗ I lack the required permissions.")
+        await ctx.send("❗ I lack the required permissions.", delete_after=30)
     elif isinstance(error, commands.CommandOnCooldown):
-        await ctx.send(f"⏱️ Command on cooldown. Try again in {error.retry_after:.1f} seconds.")
+        await ctx.send(f"⏱️ Command on cooldown. Try again in {error.retry_after:.1f} seconds.", delete_after=30)
     else:
-        cmd_name = getattr(ctx.command, 'name', 'unknown')
-        logger.error(f"Unexpected error: {error}, Command: {cmd_name}, Message: {ctx.message.content}")
-        await ctx.send("❗ An unexpected error occurred. Try again later or contact staff.")
+        logger.error(f"Unexpected error in command '{cmd_name}': {error}, Type: {type(error).__name__}")
+        await ctx.send("❗ An unexpected error occurred. Try again later or contact staff.", delete_after=30)
+
+@bot.command()
+async def apply(ctx: commands.Context) -> None:
+    logger.info(f"Apply command invoked by {ctx.author.id} in channel {ctx.channel.id}")
+    apply_channel = discord.utils.get(ctx.guild.text_channels, name=config["apply_channel"])
+    if not apply_channel or not apply_channel.permissions_for(ctx.guild.me).send_messages:
+        embed = discord.Embed(
+            description=f"❗ Application channel not found or I lack permissions. Contact staff.",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed, delete_after=30)
+        await ctx.message.delete()
+        return
+
+    if isinstance(ctx.channel, discord.DMChannel) or ctx.channel != apply_channel:
+        channel_ref = apply_channel.mention if apply_channel else f"#{config['apply_channel']}"
+        embed = discord.Embed(
+            description=f"❗ Please use this command in {channel_ref}.",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed, delete_after=30)
+        await ctx.message.delete()
+        return
+
+    user_id = str(ctx.author.id)
+    last_application = None
+    for status in ["pending", "approved", "declined"]:
+        if user_id in applications[status]:
+            last_application = applications[status][user_id]
+            break
+    
+    if last_application:
+        applied_at = datetime.fromisoformat(last_application["timestamp"])
+        cooldown_until = applied_at + timedelta(seconds=config["application_cooldown"])
+        if datetime.now() < cooldown_until:
+            time_left = cooldown_until - datetime.now()
+            hours, remainder = divmod(time_left.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+            embed = discord.Embed(
+                description=f"❗ You must wait **{hours}h {minutes}m** before applying again.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed, delete_after=30)
+            await ctx.message.delete()
+            return
+        if user_id in applications["pending"]:
+            embed = discord.Embed(
+                description="❗ You have a pending application. Wait for staff review.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed, delete_after=30)
+            await ctx.message.delete()
+            return
+    
+    member_role = discord.utils.get(ctx.guild.roles, name=config["member_role"])
+    if member_role and member_role in ctx.author.roles:
+        embed = discord.Embed(
+            description=f"❗ You already have the {member_role.mention} role!",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed, delete_after=30)
+        await ctx.message.delete()
+        return
+    
+    await ctx.message.delete()
+    
+    try:
+        dm_channel = await ctx.author.create_dm()
+    except discord.Forbidden:
+        logger.error(f"Cannot DM user {ctx.author.name} ({ctx.author.id})")
+        embed = discord.Embed(
+            description="❗ I cannot send you direct messages. Enable DMs from server members and try again.",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed, delete_after=30)
+        return
+
+    progress_embed = discord.Embed(
+        title="Project Zomboid Server Application",
+        description="I've sent you a DM to complete your application! Check your direct messages.",
+        color=discord.Color.blue()
+    )
+    progress_msg = await ctx.send(embed=progress_embed, delete_after=15)
+    
+    def check(m: discord.Message) -> bool:
+        return m.author == ctx.author and m.channel == dm_channel
+
+    application_data = {
+        "user_id": ctx.author.id,
+        "username": f"{ctx.author.name}",
+        "timestamp": datetime.now().isoformat(),
+        "guild_id": ctx.guild.id,
+        "guild_name": ctx.guild.name
+    }
+    
+    try:
+        welcome_embed = discord.Embed(
+            title="Project Zomboid Server Application",
+            description=(
+                "Thanks for applying to join our Project Zomboid server!\n\n"
+                "I'll ask you a few questions to complete your application.\n"
+                "Type `cancel` at any time to cancel the application."
+            ),
+            color=discord.Color.blue()
+        )
+        welcome_embed.add_field(name="Step 1/3", value="First, I'll need your Steam profile link", inline=False)
+        await dm_channel.send(embed=welcome_embed)
+        
+        steam_embed = discord.Embed(
+            description="🔗 Please provide your Steam profile link (must be a valid URL).",
+            color=discord.Color.blue()
+        )
+        steam_embed.set_footer(text="Example: https://steamcommunity.com/id/username")
+        await dm_channel.send(embed=steam_embed)
+
+        while True:
+            steam_msg = await bot.wait_for('message', check=check, timeout=config["response_timeout"])
+            if steam_msg.content.lower() == 'cancel':
+                await dm_channel.send(embed=discord.Embed(description="Application cancelled.", color=discord.Color.red()))
+                return
+            steam_link = steam_msg.content.strip()
+            if STEAM_PROFILE_REGEX.match(steam_link):
+                application_data["steam_link"] = steam_link
+                break
+            await dm_channel.send(embed=discord.Embed(
+                description="❗ Invalid Steam profile link. Try again or type `cancel`.",
+                color=discord.Color.red()
+            ))
+
+        progress_embed = discord.Embed(
+            title="Step 2/3",
+            description="How many hours have you played Project Zomboid? (Enter a number)",
+            color=discord.Color.blue()
+        )
+        await dm_channel.send(embed=progress_embed)
+
+        while True:
+            hours_msg = await bot.wait_for('message', check=check, timeout=config["response_timeout"])
+            if hours_msg.content.lower() == 'cancel':
+                await dm_channel.send(embed=discord.Embed(description="Application cancelled.", color=discord.Color.red()))
+                return
+            hours_played = hours_msg.content.strip()
+            try:
+                hours = float(hours_played.replace(',', ''))
+                if hours < config["min_hours"]:
+                    await dm_channel.send(embed=discord.Embed(
+                        description=f"❗ Minimum {config['min_hours']} hours required. Application cancelled.",
+                        color=discord.Color.red()
+                    ))
+                    return
+                application_data["hours_played"] = hours
+                break
+            except ValueError:
+                await dm_channel.send(embed=discord.Embed(
+                    description="❗ Please enter a valid number of hours or type `cancel`.",
+                    color=discord.Color.red()
+                ))
+
+        custom_answers = {}
+        custom_questions = config.get("custom_questions", [])
+        for i, question in enumerate(custom_questions):
+            progress_embed = discord.Embed(
+                title=f"Additional Question {i+1}/{len(custom_questions)}",
+                description=question,
+                color=discord.Color.blue()
+            )
+            await dm_channel.send(embed=progress_embed)
+            answer_msg = await bot.wait_for('message', check=check, timeout=config["response_timeout"])
+            if answer_msg.content.lower() == 'cancel':
+                await dm_channel.send(embed=discord.Embed(description="Application cancelled.", color=discord.Color.red()))
+                return
+            custom_answers[f"question_{i+1}"] = {"question": question, "answer": answer_msg.content}
+        
+        application_data["custom_answers"] = custom_answers
+
+        confirmation_embed = discord.Embed(
+            title="Step 3/3 - Review and Confirm",
+            description=(
+                "Review your application and confirm by typing `I confirm` or type `cancel` to quit.\n\n"
+                "By confirming, you agree to follow the server rules."
+            ),
+            color=discord.Color.blue()
+        )
+        confirmation_embed.add_field(name="Steam Profile", value=application_data["steam_link"], inline=False)
+        confirmation_embed.add_field(name="Hours Played", value=str(application_data["hours_played"]), inline=False)
+        for i, qa in enumerate(custom_answers.values()):
+            confirmation_embed.add_field(name=f"Q: {qa['question']}", value=f"A: {qa['answer']}", inline=False)
+        await dm_channel.send(embed=confirmation_embed)
+
+        while True:
+            confirm_msg = await bot.wait_for('message', check=check, timeout=config["response_timeout"])
+            if confirm_msg.content.lower() == 'cancel':
+                await dm_channel.send(embed=discord.Embed(description="Application cancelled.", color=discord.Color.red()))
+                return
+            if confirm_msg.content.lower() == 'i confirm':
+                break
+            await dm_channel.send(embed=discord.Embed(
+                description="Please type `I confirm` to submit or `cancel` to quit.",
+                color=discord.Color.yellow()
+            ))
+
+        applications["pending"][user_id] = application_data
+        save_applications(applications)
+
+        hours_display = f"{application_data['hours_played']:,}"
+        application_embed = discord.Embed(
+            title="📝 New Application",
+            description=f"Submitted by {ctx.author.mention}",
+            color=discord.Color.green(),
+            timestamp=datetime.now()
+        )
+        application_embed.add_field(name="Steam Profile", value=application_data["steam_link"], inline=False)
+        application_embed.add_field(name="Hours Played", value=hours_display, inline=False)
+        for i, qa in enumerate(custom_answers.values()):
+            application_embed.add_field(name=f"Q: {qa['question']}", value=f"A: {qa['answer']}", inline=False)
+        application_embed.set_footer(text=f"User ID: {ctx.author.id}")
+        
+        view = ApproveDeclineView(applicant_id=ctx.author.id, application_data=application_data)
+        await apply_channel.send(embed=application_embed, view=view)
+        
+        success_embed = discord.Embed(
+            title="✅ Application Submitted!",
+            description="Your application has been submitted for review. Staff will review it soon.",
+            color=discord.Color.green()
+        )
+        await dm_channel.send(embed=success_embed)
+
+    except asyncio.TimeoutError:
+        await dm_channel.send(embed=discord.Embed(
+            title="⏱️ Application Timed Out",
+            description="You took too long to respond. Start a new application when ready.",
+            color=discord.Color.red()
+        ))
+    except Exception as e:
+        logger.error(f"Error in apply command for user {ctx.author.id}: {e}")
+        await dm_channel.send(embed=discord.Embed(
+            title="⚠️ Error",
+            description="Something went wrong. Try again later or contact staff.",
+            color=discord.Color.red()
+        ))
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
