@@ -3,15 +3,18 @@ from discord.ext import commands
 import asyncio
 from datetime import datetime
 import re
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 
 # Bot setup
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
-
-# Replace with your bot token
-DISCORD_TOKEN = 'YOUR_DISCORD_TOKEN'
 
 STEAM_PROFILE_REGEX = re.compile(r'https?://steamcommunity\.com/(id|profiles)/[a-zA-Z0-9_-]+/?')
 
