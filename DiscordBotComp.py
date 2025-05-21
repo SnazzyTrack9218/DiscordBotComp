@@ -310,8 +310,9 @@ async def on_member_join(member: discord.Member) -> None:
 async def apply(ctx: commands.Context) -> None:
     if isinstance(ctx.channel, discord.DMChannel) or ctx.channel.name != config["apply_channel"]:
         apply_channel = discord.utils.get(ctx.guild.text_channels, name=config["apply_channel"])
+        channel_ref = apply_channel.mention if apply_channel else f"#{config['apply_channel']}"
         embed = discord.Embed(
-            description=f"❗ Please use this command in {apply_channel.mention if apply_channel else f'#{config['apply_channel']}'}.",
+            description=f"❗ Please use this command in {channel_ref}.",
             color=discord.Color.red()
         )
         await ctx.send(embed=embed, delete_after=30)
