@@ -754,10 +754,11 @@ async def application_details(ctx: commands.Context, user: discord.User) -> None
 
 @bot.command()
 async def help(ctx: commands.Context, command: Optional[str] = None) -> None:
+    logger.info(f"Help command invoked by {ctx.author.id} for command: {command or 'none'}")
     if command:
         cmd = bot.get_command(command)
         if not cmd:
-            await ctx.send(f"Command `{command}` not found.")
+            await ctx.send(f"Command `{command}` not found.", delete_after=30)
             return
         embed = discord.Embed(
             title=f"Help: !{cmd.name}",
@@ -766,7 +767,7 @@ async def help(ctx: commands.Context, command: Optional[str] = None) -> None:
         )
         if cmd.signature:
             embed.add_field(name="Usage", value=f"!{cmd.name} {cmd.signature}", inline=False)
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, delete_after=30)
         return
     
     embed = discord.Embed(
@@ -777,7 +778,10 @@ async def help(ctx: commands.Context, command: Optional[str] = None) -> None:
     is_admin = ctx.author.guild_permissions.administrator
     is_staff = any(role.name.lower() in config["staff_roles"] for role in ctx.author.roles)
     
-    public_cmds = [f"**!{cmd.name}** - {cmd.help or 'No description'}" for cmd in bot.commands if not cmd.checks]
+    public_cmds = []
+    for cmd in bot.commands:
+        if not cmd.checks:  # Public commands have no checks
+            public_cmds.append(f"**!{cmd.name}** - {cmd.help or 'No description'}")
     if public_cmds:
         embed.add_field(name="📝 Public Commands", value="\n".join(public_cmds), inline=False)
     
@@ -795,7 +799,7 @@ async def help(ctx: commands.Context, command: Optional[str] = None) -> None:
             embed.add_field(name="🛡️ Staff Commands", value="\n".join(staff_cmds), inline=False)
     
     embed.set_footer(text="Type !help <command> for more details.")
-    await ctx.send(embed=embed)
+    await ctx.send(embed=embed, delete_after=30)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
