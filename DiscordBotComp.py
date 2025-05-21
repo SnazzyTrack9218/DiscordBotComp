@@ -782,7 +782,6 @@ async def help(ctx: commands.Context, command: Optional[str] = None) -> None:
         staff_cmds = []
         for cmd in bot.commands:
             if cmd.checks:
-                # Check if command requires admin or staff permissions
                 requires_admin = any(
                     isinstance(check, commands.has_permissions) and check.kwargs.get('administrator', False)
                     for check in cmd.checks
@@ -853,12 +852,13 @@ async def clear_applications(ctx: commands.Context, status: str = "none") -> Non
 @bot.event
 async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
     if isinstance(error, commands.CommandNotFound):
+        await ctx.send("❗ Command not found. Use `!help` for available commands.")
         return
     elif isinstance(error, commands.MissingRequiredArgument):
-        cmd_name = ctx.command.name if ctx.command else "unknown"
+        cmd_name = getattr(ctx.command, 'name', 'unknown')
         await ctx.send(f"❗ Missing argument: {error.param.name}. Use `!help {cmd_name}` for usage.")
     elif isinstance(error, commands.BadArgument):
-        cmd_name = ctx.command.name if ctx.command else "unknown"
+        cmd_name = getattr(ctx.command, 'name', 'unknown')
         await ctx.send(f"❗ Invalid argument. Use `!help {cmd_name}` for usage.")
     elif isinstance(error, commands.MissingPermissions):
         await ctx.send("❗ You don't have permission to use this command.")
@@ -867,8 +867,9 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
     elif isinstance(error, commands.CommandOnCooldown):
         await ctx.send(f"⏱️ Command on cooldown. Try again in {error.retry_after:.1f} seconds.")
     else:
-        logger.error(f"Unexpected error: {error}, Command: {ctx.command}, Message: {ctx.message.content}")
-        await ctx.send("❗ An unexpected error occurred. Try again later.")
+        cmd_name = getattr(ctx.command, 'name', 'unknown')
+        logger.error(f"Unexpected error: {error}, Command: {cmd_name}, Message: {ctx.message.content}")
+        await ctx.send("❗ An unexpected error occurred. Try again later or contact staff.")
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
