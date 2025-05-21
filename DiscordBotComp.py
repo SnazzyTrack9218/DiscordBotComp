@@ -782,7 +782,7 @@ async def help(ctx: commands.Context, command: Optional[str] = None) -> None:
         staff_cmds = []
         for cmd in bot.commands:
             if any(isinstance(check, commands.has_permissions) for check in cmd.checks):
-                if not cmd.hidden and (not cmd.checks[0].kwargs.get('administrator', False) or is_admin):
+                if not cmd.hidden and (not any(check.__qualname__ == 'has_permissions.<locals>.predicate' and check.kwargs.get('administrator', False) for check in cmd.checks) or is_admin):
                     staff_cmds.append(f"**!{cmd.name}** - {cmd.help or 'No description'}")
         if staff_cmds:
             embed.add_field(name="🛡️ Staff Commands", value="\n".join(staff_cmds), inline=False)
