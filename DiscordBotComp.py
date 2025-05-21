@@ -1,3 +1,4 @@
+```python
 import discord
 from discord.ext import commands
 import asyncio
@@ -6,7 +7,7 @@ import re
 import os
 import json
 import logging
-from .env import load_dotenv
+from dotenv import load_dotenv
 from typing import Optional, Dict, List, Union
 
 # Set up logging
@@ -57,7 +58,6 @@ def load_config() -> Dict[str, Union[str, int, List[str], None]]:
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
-            # Add missing default keys
             for key, value in DEFAULT_CONFIG.items():
                 if key not in config:
                     config[key] = value
@@ -270,7 +270,7 @@ async def on_member_join(member: discord.Member) -> None:
     channel = None
     if config.get("welcome_channel"):
         channel = member.guild.get_channel(int(config["welcome_channel"]))
-    if not channel:
+    if not channel or not channel.permissions_for(member.guild.me).send_messages:
         channel = member.guild.system_channel or next(
             (c for c in member.guild.text_channels if c.permissions_for(member.guild.me).send_messages), None
         )
@@ -308,8 +308,16 @@ async def on_member_join(member: discord.Member) -> None:
 
 @bot.command()
 async def apply(ctx: commands.Context) -> None:
+    apply_channel = discord.utils.get(ctx.guild.text_channels, name=config["apply_channel"])
+    if not apply_channel or not apply_channel.permissions_for(ctx.guild.me).send_messages:
+        embed = discord.Embed(
+            description=f"❗ Application channel not found or I lack permissions. Contact staff.",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed, delete_after=30)
+        return
+
     if isinstance(ctx.channel, discord.DMChannel) or ctx.channel.name != config["apply_channel"]:
-        apply_channel = discord.utils.get(ctx.guild.text_channels, name=config["apply_channel"])
         channel_ref = apply_channel.mention if apply_channel else f"#{config['apply_channel']}"
         embed = discord.Embed(
             description=f"❗ Please use this command in {channel_ref}.",
@@ -333,7 +341,7 @@ async def apply(ctx: commands.Context) -> None:
             hours, remainder = divmod(time_left.seconds, 3600)
             minutes, _ = divmod(remainder, 60)
             embed = discord.Embed(
-                description=f"❗ You need to wait **{hours}h {minutes}m** before applying again.",
+                description=f"❗ You must wait **{hours}h {minutes}m** before applying again.",
                 color=discord.Color.red()
             )
             await ctx.send(embed=embed, delete_after=30)
@@ -341,7 +349,7 @@ async def apply(ctx: commands.Context) -> None:
             return
         if user_id in applications["pending"]:
             embed = discord.Embed(
-                description="❗ You already have a pending application. Please wait for staff to review it.",
+                description="❗ You have a pending application. Wait for staff review.",
                 color=discord.Color.red()
             )
             await ctx.send(embed=embed, delete_after=30)
@@ -365,7 +373,7 @@ async def apply(ctx: commands.Context) -> None:
     except discord.Forbidden:
         logger.error(f"Cannot DM user {ctx.author.name} ({ctx.author.id})")
         embed = discord.Embed(
-            description="❗ I cannot send you direct messages. Please enable DMs from server members and try again.",
+            description="❗ I cannot send you direct messages. Enable DMs from server members and try again.",
             color=discord.Color.red()
         )
         await ctx.send(embed=embed, delete_after=30)
@@ -373,7 +381,7 @@ async def apply(ctx: commands.Context) -> None:
 
     progress_embed = discord.Embed(
         title="Project Zomboid Server Application",
-        description="I've sent you a DM to complete your application! Please check your direct messages.",
+        description="I've sent you a DM to complete your application! Check your direct messages.",
         color=discord.Color.blue()
     )
     progress_msg = await ctx.send(embed=progress_embed, delete_after=15)
@@ -395,7 +403,7 @@ async def apply(ctx: commands.Context) -> None:
             description=(
                 "Thanks for applying to join our Project Zomboid server!\n\n"
                 "I'll ask you a few questions to complete your application.\n"
-                "You can type `cancel` at any time to cancel the application."
+                "Type `cancel` at any time to cancel the application."
             ),
             color=discord.Color.blue()
         )
@@ -425,7 +433,7 @@ async def apply(ctx: commands.Context) -> None:
 
         progress_embed = discord.Embed(
             title="Step 2/3",
-            description="How many hours have you played Project Zomboid?",
+            description="How many hours have you played Project Zomboid? (Enter a number)",
             color=discord.Color.blue()
         )
         await dm_channel.send(embed=progress_embed)
@@ -447,8 +455,10 @@ async def apply(ctx: commands.Context) -> None:
                 application_data["hours_played"] = hours
                 break
             except ValueError:
-                application_data["hours_played"] = hours_played
-                break
+                await dm_channel.send(embed=discord.Embed(
+                    description="❗ Please enter a valid number of hours or type `cancel`.",
+                    color=discord.Color.red()
+                ))
 
         custom_answers = {}
         custom_questions = config.get("custom_questions", [])
@@ -470,8 +480,8 @@ async def apply(ctx: commands.Context) -> None:
         confirmation_embed = discord.Embed(
             title="Step 3/3 - Review and Confirm",
             description=(
-                "Please review your application and confirm by typing `I confirm` or type `cancel` to quit.\n\n"
-                "By confirming, you acknowledge that you have read and agree to follow the server rules."
+                "Review your application and confirm by typing `I confirm` or type `cancel` to quit.\n\n"
+                "By confirming, you agree to follow the server rules."
             ),
             color=discord.Color.blue()
         )
@@ -496,37 +506,28 @@ async def apply(ctx: commands.Context) -> None:
         applications["pending"][user_id] = application_data
         save_applications(applications)
 
-        apply_channel = discord.utils.get(ctx.guild.text_channels, name=config["apply_channel"])
-        if apply_channel and apply_channel.permissions_for(ctx.guild.me).send_messages:
-            hours_display = f"{application_data['hours_played']:,}" if isinstance(application_data["hours_played"], (int, float)) else application_data["hours_played"]
-            application_embed = discord.Embed(
-                title="📝 New Application",
-                description=f"Submitted by {ctx.author.mention}",
-                color=discord.Color.green(),
-                timestamp=datetime.now()
-            )
-            application_embed.add_field(name="Steam Profile", value=application_data["steam_link"], inline=False)
-            application_embed.add_field(name="Hours Played", value=hours_display, inline=False)
-            for i, qa in enumerate(custom_answers.values()):
-                application_embed.add_field(name=f"Q: {qa['question']}", value=f"A: {qa['answer']}", inline=False)
-            application_embed.set_footer(text=f"User ID: {ctx.author.id}")
-            
-            view = ApproveDeclineView(applicant_id=ctx.author.id, application_data=application_data)
-            await apply_channel.send(embed=application_embed, view=view)
-            
-            success_embed = discord.Embed(
-                title="✅ Application Submitted!",
-                description="Your application has been submitted for review. Staff will review it soon.",
-                color=discord.Color.green()
-            )
-            await dm_channel.send(embed=success_embed)
-        else:
-            logger.error(f"Apply channel {config['apply_channel']} not found or no permissions")
-            await dm_channel.send(embed=discord.Embed(
-                title="⚠️ Error",
-                description="Application channel not found or I lack permissions. Contact staff.",
-                color=discord.Color.red()
-            ))
+        hours_display = f"{application_data['hours_played']:,}" if isinstance(application_data["hours_played"], (int, float)) else application_data["hours_played"]
+        application_embed = discord.Embed(
+            title="📝 New Application",
+            description=f"Submitted by {ctx.author.mention}",
+            color=discord.Color.green(),
+            timestamp=datetime.now()
+        )
+        application_embed.add_field(name="Steam Profile", value=application_data["steam_link"], inline=False)
+        application_embed.add_field(name="Hours Played", value=hours_display, inline=False)
+        for i, qa in enumerate(custom_answers.values()):
+            application_embed.add_field(name=f"Q: {qa['question']}", value=f"A: {qa['answer']}", inline=False)
+        application_embed.set_footer(text=f"User ID: {ctx.author.id}")
+        
+        view = ApproveDeclineView(applicant_id=ctx.author.id, application_data=application_data)
+        await apply_channel.send(embed=application_embed, view=view)
+        
+        success_embed = discord.Embed(
+            title="✅ Application Submitted!",
+            description="Your application has been submitted for review. Staff will review it soon.",
+            color=discord.Color.green()
+        )
+        await dm_channel.send(embed=success_embed)
 
     except asyncio.TimeoutError:
         await dm_channel.send(embed=discord.Embed(
@@ -600,8 +601,9 @@ async def config(ctx: commands.Context, setting: Optional[str] = None, *, value:
             return
     elif setting == "welcome_channel":
         channel_id = value[2:-1] if value.startswith("<#") and value.endswith(">") else value
-        if not ctx.guild.get_channel(int(channel_id)):
-            await ctx.send("Invalid channel ID or mention")
+        channel = ctx.guild.get_channel(int(channel_id))
+        if not channel or not channel.permissions_for(ctx.guild.me).send_messages:
+            await ctx.send("Invalid channel ID or I lack permissions to send messages there")
             return
         config[setting] = channel_id
     else:
@@ -864,3 +866,4 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
+```
