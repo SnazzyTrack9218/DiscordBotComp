@@ -100,160 +100,97 @@ def save_applications(applications: Dict[str, Dict]) -> None:
 config = load_config()
 applications = load_applications()
 
-class ApproveDeclineView(discord.ui.View):
-    def __init__(self, applicant_id: int, application_data: Dict):
-        super().__init__(timeout=None)
-        self.applicant_id = applicant_id
-        self.application_data = application_data
-        self.action_taken = False
-        self.add_item(discord.ui.Button(
-            label="Steam Profile", 
-            url=application_data["steam_link"],
-            style=discord.ButtonStyle.link
-        ))
+class CustomHelpCommand(commands.HelpCommand):
+    def get_command_signature(self, command):
+        return f'{self.context.clean_prefix}{command.qualified_name} {command.signature}'
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if self.action_taken:
-            await interaction.response.send_message("This application has already been processed.", ephemeral=True)
-            return False
-        
-        if not any(role.name.lower() in config["staff_roles"] for role in interaction.user.roles):
-            await interaction.response.send_message("Only staff members can process applications.", ephemeral=True)
-            return False
-        return True
-
-    @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, custom_id="approve_button")
-    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.action_taken = True
-        for item in self.children:
-            if isinstance(item, discord.ui.Button) and item.url is None:
-                item.disabled = True
-        
-        try:
-            user = await bot.fetch_user(self.applicant_id)
-            guild = interaction.guild
-            member = guild.get_member(self.applicant_id)
-            
-            if member:
-                member_role = discord.utils.get(guild.roles, name=config["member_role"])
-                role_message = (f"Assigned {member_role.mention} role." if member_role and await member.add_roles(member_role)
-                               else f"Member role '{config['member_role']}' not found or bot lacks permissions.")
-                
-                applications["pending"].pop(str(self.applicant_id), None)
-                applications["approved"][str(self.applicant_id)] = {
-                    **self.application_data,
-                    "approved_by": interaction.user.id,
-                    "approved_at": datetime.now().isoformat()
-                }
-                save_applications(applications)
-                
-                embed = discord.Embed(
-                    description=f"✅ Application for {user.mention} **approved** by {interaction.user.mention}!\n{role_message}",
-                    color=discord.Color.green()
-                )
-                embed.add_field(name="Steam Profile", value=self.application_data["steam_link"], inline=False)
-                embed.add_field(name="Hours Played", value=f"{self.application_data['hours_played']} hours", inline=True)
-                embed.add_field(name="Applied At", value=f"<t:{int(datetime.fromisoformat(self.application_data['timestamp']).timestamp())}:R>", inline=True)
-                
-                try:
-                    dm_channel = await user.create_dm()
-                    welcome_embed = discord.Embed(
-                        title="Application Approved! 🎉",
-                        description=f"Your application to join {guild.name} has been approved!\nYou now have access to member channels.",
-                        color=discord.Color.green()
-                    )
-                    await dm_channel.send(embed=welcome_embed)
-                except discord.DiscordException:
-                    logger.warning(f"Failed to send DM to {user.id}")
-                    
-                await interaction.response.edit_message(embed=embed, view=self)
-            else:
-                await interaction.response.edit_message(
-                    embed=discord.Embed(
-                        description=f"⚠️ User with ID {self.applicant_id} is no longer in the server.",
-                        color=discord.Color.orange()
-                    ), 
-                    view=self
-                )
-        except Exception as e:
-            logger.error(f"Error in approve button: {e}")
-            await interaction.response.edit_message(
-                embed=discord.Embed(description=f"⚠️ An error occurred: {str(e)}", color=discord.Color.red()),
-                view=self
-            )
-
-    @discord.ui.button(label="Decline", style=discord.ButtonStyle.red, custom_id="decline_button")
-    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        reason_modal = DeclineReasonModal(self)
-        await interaction.response.send_modal(reason_modal)
-
-class DeclineReasonModal(discord.ui.Modal):
-    def __init__(self, view: ApproveDeclineView):
-        super().__init__(title="Decline Application")
-        self.view = view
-        self.reason = discord.ui.TextInput(
-            label="Reason for declining (optional)",
-            style=discord.TextStyle.paragraph,
-            placeholder="Enter reason why application was declined...",
-            required=False,
-            max_length=1000
+    async def send_bot_help(self, mapping):
+        embed = discord.Embed(
+            title="Project Zomboid Application Bot Help",
+            description="Available commands:",
+            color=discord.Color.blue()
         )
-        self.add_item(self.reason)
         
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        self.view.action_taken = True
-        for item in self.view.children:
-            if isinstance(item, discord.ui.Button) and item.url is None:
-                item.disabled = True
+        # Get user permissions
+        is_admin = self.context.author.guild_permissions.administrator
+        is_staff = any(role.name.lower() in config["staff_roles"] for role in self.context.author.roles)
         
-        reason_text = self.reason.value.strip() if self.reason.value else "No reason provided"
+        # Public commands
+        public_cmds = []
+        for cog, commands in mapping.items():
+            filtered = await self.filter_commands(commands, sort=True)
+            for command in filtered:
+                if not command.checks:
+                    public_cmds.append(f"**!{command.name}** - {command.help or 'No description'}")
         
-        try:
-            user = await bot.fetch_user(self.view.applicant_id)
-            applications["pending"].pop(str(self.view.applicant_id), None)
-            applications["declined"][str(self.view.applicant_id)] = {
-                **self.view.application_data,
-                "declined_by": interaction.user.id,
-                "declined_at": datetime.now().isoformat(),
-                "reason": reason_text
-            }
-            save_applications(applications)
-            
-            embed = discord.Embed(
-                description=f"❌ Application for {user.mention} **declined** by {interaction.user.mention}.",
-                color=discord.Color.red()
+        if public_cmds:
+            embed.add_field(
+                name="📝 Public Commands",
+                value="\n".join(public_cmds),
+                inline=False
             )
-            embed.add_field(name="Steam Profile", value=self.view.application_data["steam_link"], inline=False)
-            embed.add_field(name="Hours Played", value=f"{self.view.application_data['hours_played']} hours", inline=True)
-            embed.add_field(name="Reason", value=reason_text, inline=False)
+        
+        # Staff commands
+        if is_staff:
+            staff_cmds = []
+            for cog, commands in mapping.items():
+                filtered = await self.filter_commands(commands, sort=True)
+                for command in filtered:
+                    if hasattr(command, 'checks') and command.checks:
+                        requires_admin = any(
+                            isinstance(check, commands.has_permissions) 
+                            and check.kwargs.get('administrator', False)
+                            for check in command.checks
+                        )
+                        if not getattr(command, 'hidden', False) and (not requires_admin or is_admin):
+                            staff_cmds.append(
+                                f"**!{command.name}** - {command.help or 'No description'}"
+                            )
             
-            try:
-                dm_channel = await user.create_dm()
-                decline_embed = discord.Embed(
-                    title="Application Status Update",
-                    description=f"Your application to join the server has been declined.",
-                    color=discord.Color.red()
+            if staff_cmds:
+                embed.add_field(
+                    name="🛡️ Staff Commands",
+                    value="\n".join(staff_cmds),
+                    inline=False
                 )
-                if reason_text != "No reason provided":
-                    decline_embed.add_field(name="Reason", value=reason_text)
-                decline_embed.add_field(name="What next?", value="You can apply again after 24 hours or contact a staff member if you have questions.")
-                await dm_channel.send(embed=decline_embed)
-            except discord.DiscordException:
-                logger.warning(f"Failed to send DM to {user.id}")
-            
-            await interaction.response.edit_message(embed=embed, view=self.view)
-            await asyncio.sleep(300)
-            try:
-                await interaction.message.delete()
-            except discord.NotFound:
-                pass
-                
-        except Exception as e:
-            logger.error(f"Error in decline modal: {e}")
-            await interaction.response.edit_message(
-                embed=discord.Embed(description=f"⚠️ An error occurred: {str(e)}", color=discord.Color.red()),
-                view=self.view
+        
+        embed.set_footer(text="Type !help <command> for more details.")
+        await self.get_destination().send(embed=embed)
+
+    async def send_command_help(self, command):
+        embed = discord.Embed(
+            title=self.get_command_signature(command),
+            color=discord.Color.blue()
+        )
+        
+        if command.help:
+            embed.description = command.help
+        
+        if command.aliases:
+            embed.add_field(
+                name="Aliases",
+                value=", ".join(command.aliases),
+                inline=False
             )
+        
+        await self.get_destination().send(embed=embed)
+
+    async def send_error_message(self, error):
+        embed = discord.Embed(
+            title="Error",
+            description=error,
+            color=discord.Color.red()
+        )
+        await self.get_destination().send(embed=embed)
+
+# Set up the help command
+bot.help_command = CustomHelpCommand(
+    command_attrs={
+        'name': "help",
+        'aliases': ["helpme"],
+        'cooldown': commands.CooldownMapping.from_cooldown(3, 5, commands.BucketType.user)
+    }
+)
 
 @bot.event
 async def on_ready() -> None:
@@ -304,7 +241,7 @@ async def on_member_join(member: discord.Member) -> None:
         )
     
     await channel.send(embed=embed)
-    
+
 @bot.command()
 async def apply(ctx: commands.Context) -> None:
     logger.info(f"Apply command invoked by {ctx.author.id} in channel {ctx.channel.id}")
@@ -753,55 +690,6 @@ async def application_details(ctx: commands.Context, user: discord.User) -> None
     await ctx.send(embed=embed)
 
 @bot.command()
-async def help(ctx: commands.Context, command: Optional[str] = None) -> None:
-    logger.info(f"Help command invoked by {ctx.author.id} for command: {command or 'none'}")
-    if command:
-        cmd = bot.get_command(command)
-        if not cmd:
-            await ctx.send(f"Command `{command}` not found.", delete_after=30)
-            return
-        embed = discord.Embed(
-            title=f"Help: !{getattr(cmd, 'name', str(cmd))}",
-            description=getattr(cmd, 'help', "No description available."),
-            color=discord.Color.blue()
-        )
-        usage = getattr(cmd, 'signature', None)
-        if usage:
-            embed.add_field(name="Usage", value=f"!{cmd.name} {usage}", inline=False)
-        await ctx.send(embed=embed, delete_after=30)
-        return
-
-    embed = discord.Embed(
-        title="Project Zomboid Application Bot Help",
-        description="Available commands:",
-        color=discord.Color.blue()
-    )
-    is_admin = ctx.author.guild_permissions.administrator
-    is_staff = any(role.name.lower() in config.get("staff_roles", []) for role in ctx.author.roles)
-
-    public_cmds = []
-    for cmd in bot.commands:
-        # Only show commands without permission checks
-        if not getattr(cmd, 'checks', None):
-            public_cmds.append(f"**!{cmd.name}** - {getattr(cmd, 'help', 'No description')}")
-    if public_cmds:
-        embed.add_field(name="📝 Public Commands", value="\n".join(public_cmds), inline=False)
-    if is_staff:
-        staff_cmds = []
-        for cmd in bot.commands:
-            if getattr(cmd, 'checks', None):
-                requires_admin = any(
-                    isinstance(check, commands.has_permissions) and getattr(check, 'kwargs', {}).get('administrator', False)
-                    for check in getattr(cmd, 'checks', [])
-                )
-                if not getattr(cmd, 'hidden', False) and (not requires_admin or is_admin):
-                    staff_cmds.append(f"**!{cmd.name}** - {getattr(cmd, 'help', 'No description')}")
-        if staff_cmds:
-            embed.add_field(name="🛡️ Staff Commands", value="\n".join(staff_cmds), inline=False)
-    embed.set_footer(text="Type !help <command> for more details.")
-    await ctx.send(embed=embed, delete_after=30)
-
-@bot.command()
 @commands.has_permissions(administrator=True)
 async def add_question(ctx: commands.Context, *, question: str) -> None:
     if "custom_questions" not in config:
@@ -859,12 +747,13 @@ async def clear_applications(ctx: commands.Context, status: str = "none") -> Non
 @bot.event
 async def on_command_error(ctx, error):
     logger.error(f"Error in command '{ctx.command}': {error}")
+    
     if isinstance(error, commands.CommandNotFound):
-        await ctx.send(f"Unknown command. Type `!help` for a list of commands.", delete_after=10)
+        await ctx.send("Unknown command. Type `!help` for a list of commands.", delete_after=10)
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send(f"Missing argument: {error}", delete_after=10)
     elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("You do not have permission to use this command.", delete_after=10)
+        await ctx.send("You don't have permission to use this command.", delete_after=10)
     elif isinstance(error, commands.CommandInvokeError):
         # Log the original exception for debugging
         logger.error(f"Original exception: {error.original}")
