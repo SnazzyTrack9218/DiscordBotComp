@@ -856,5 +856,21 @@ async def clear_applications(ctx: commands.Context, status: str = "none") -> Non
     except asyncio.TimeoutError:
         await ctx.send("Operation timed out.")
 
+@bot.event
+async def on_command_error(ctx, error):
+    logger.error(f"Error in command '{ctx.command}': {error}")
+    if isinstance(error, commands.CommandNotFound):
+        await ctx.send(f"Unknown command. Type `!help` for a list of commands.", delete_after=10)
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"Missing argument: {error}", delete_after=10)
+    elif isinstance(error, commands.MissingPermissions):
+        await ctx.send("You do not have permission to use this command.", delete_after=10)
+    elif isinstance(error, commands.CommandInvokeError):
+        # Log the original exception for debugging
+        logger.error(f"Original exception: {error.original}")
+        await ctx.send("An error occurred while executing the command.", delete_after=10)
+    else:
+        await ctx.send(f"An unexpected error occurred: {error}", delete_after=10)
+
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
