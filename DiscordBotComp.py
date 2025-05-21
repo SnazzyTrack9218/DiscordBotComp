@@ -505,7 +505,7 @@ async def apply(ctx: commands.Context) -> None:
         applications["pending"][user_id] = application_data
         save_applications(applications)
 
-        hours_display = f"{application_data['hours_played']:,}" if isinstance(application_data["hours_played"], (int, float)) else application_data["hours_played"]
+        hours_display = f"{application_data['hours_played']:,}"
         application_embed = discord.Embed(
             title="📝 New Application",
             description=f"Submitted by {ctx.author.mention}",
@@ -781,8 +781,13 @@ async def help(ctx: commands.Context, command: Optional[str] = None) -> None:
     if is_staff:
         staff_cmds = []
         for cmd in bot.commands:
-            if any(isinstance(check, commands.has_permissions) for check in cmd.checks):
-                if not cmd.hidden and (not any(check.__qualname__ == 'has_permissions.<locals>.predicate' and check.kwargs.get('administrator', False) for check in cmd.checks) or is_admin):
+            if cmd.checks:
+                # Check if command requires admin or staff permissions
+                requires_admin = any(
+                    isinstance(check, commands.has_permissions) and check.kwargs.get('administrator', False)
+                    for check in cmd.checks
+                )
+                if not cmd.hidden and (not requires_admin or is_admin):
                     staff_cmds.append(f"**!{cmd.name}** - {cmd.help or 'No description'}")
         if staff_cmds:
             embed.add_field(name="🛡️ Staff Commands", value="\n".join(staff_cmds), inline=False)
@@ -862,7 +867,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
     elif isinstance(error, commands.CommandOnCooldown):
         await ctx.send(f"⏱️ Command on cooldown. Try again in {error.retry_after:.1f} seconds.")
     else:
-        logger.error(f"Unexpected error: {error}")
+        logger.error(f"Unexpected error: {error}, Command: {ctx.command}, Message: {ctx.message.content}")
         await ctx.send("❗ An unexpected error occurred. Try again later.")
 
 if __name__ == "__main__":
