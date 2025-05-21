@@ -54,11 +54,17 @@ def save_applications():
         json.dump(applications, f, indent=4)
 
 def load_applications():
-    """Load applications from a JSON file"""
     global applications
     if os.path.exists('applications.json'):
         with open('applications.json', 'r') as f:
             applications = json.load(f)
+        # Ensure all applications have required keys
+        for uid, app in applications.items():
+            app.setdefault("status", "pending")
+            app.setdefault("steam_link", "N/A")
+            app.setdefault("hours_played", "N/A")
+            app.setdefault("submitted_at", datetime.now().isoformat())
+        save_applications()
 
 def has_staff_role(member):
     """Check if member has staff role"""
