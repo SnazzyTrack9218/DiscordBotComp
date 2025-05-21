@@ -850,9 +850,11 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError) 
     if isinstance(error, commands.CommandNotFound):
         return
     elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"❗ Missing argument: {error.param.name}. Use `!help {ctx.command.name}` for usage.")
+        cmd_name = ctx.command.name if ctx.command else "unknown"
+        await ctx.send(f"❗ Missing argument: {error.param.name}. Use `!help {cmd_name}` for usage.")
     elif isinstance(error, commands.BadArgument):
-        await ctx.send(f"❗ Invalid argument. Use `!help {ctx.command.name}` for usage.")
+        cmd_name = ctx.command.name if ctx.command else "unknown"
+        await ctx.send(f"❗ Invalid argument. Use `!help {cmd_name}` for usage.")
     elif isinstance(error, commands.MissingPermissions):
         await ctx.send("❗ You don't have permission to use this command.")
     elif isinstance(error, commands.BotMissingPermissions):
