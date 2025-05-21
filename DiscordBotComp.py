@@ -761,43 +761,43 @@ async def help(ctx: commands.Context, command: Optional[str] = None) -> None:
             await ctx.send(f"Command `{command}` not found.", delete_after=30)
             return
         embed = discord.Embed(
-            title=f"Help: !{cmd.name}",
-            description=getattr(cmd, 'help', None) or "No description available.",
+            title=f"Help: !{getattr(cmd, 'name', str(cmd))}",
+            description=getattr(cmd, 'help', "No description available."),
             color=discord.Color.blue()
         )
-        if hasattr(cmd, 'signature'):
-            embed.add_field(name="Usage", value=f"!{cmd.name} {cmd.signature}", inline=False)
+        usage = getattr(cmd, 'signature', None)
+        if usage:
+            embed.add_field(name="Usage", value=f"!{cmd.name} {usage}", inline=False)
         await ctx.send(embed=embed, delete_after=30)
         return
-    
+
     embed = discord.Embed(
         title="Project Zomboid Application Bot Help",
         description="Available commands:",
         color=discord.Color.blue()
     )
     is_admin = ctx.author.guild_permissions.administrator
-    is_staff = any(role.name.lower() in config["staff_roles"] for role in ctx.author.roles)
-    
+    is_staff = any(role.name.lower() in config.get("staff_roles", []) for role in ctx.author.roles)
+
     public_cmds = []
     for cmd in bot.commands:
-        if not cmd.checks:  # Public commands have no checks
-            public_cmds.append(f"**!{cmd.name}** - {getattr(cmd, 'help', None) or 'No description'}")
+        # Only show commands without permission checks
+        if not getattr(cmd, 'checks', None):
+            public_cmds.append(f"**!{cmd.name}** - {getattr(cmd, 'help', 'No description')}")
     if public_cmds:
         embed.add_field(name="📝 Public Commands", value="\n".join(public_cmds), inline=False)
-    
     if is_staff:
         staff_cmds = []
         for cmd in bot.commands:
-            if hasattr(cmd, 'checks') and cmd.checks:
+            if getattr(cmd, 'checks', None):
                 requires_admin = any(
-                    isinstance(check, commands.has_permissions) and check.kwargs.get('administrator', False)
-                    for check in cmd.checks
+                    isinstance(check, commands.has_permissions) and getattr(check, 'kwargs', {}).get('administrator', False)
+                    for check in getattr(cmd, 'checks', [])
                 )
                 if not getattr(cmd, 'hidden', False) and (not requires_admin or is_admin):
-                    staff_cmds.append(f"**!{cmd.name}** - {getattr(cmd, 'help', None) or 'No description'}")
+                    staff_cmds.append(f"**!{cmd.name}** - {getattr(cmd, 'help', 'No description')}")
         if staff_cmds:
             embed.add_field(name="🛡️ Staff Commands", value="\n".join(staff_cmds), inline=False)
-    
     embed.set_footer(text="Type !help <command> for more details.")
     await ctx.send(embed=embed, delete_after=30)
 
