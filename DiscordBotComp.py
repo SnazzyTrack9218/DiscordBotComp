@@ -15,7 +15,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 CONFIG_FILE = 'config.json'
 STEAM_PROFILE_REGEX = re.compile(r'https?://steamcommunity\.com/(id|profiles)/[a-zA-Z0-9_-]+/?')
 DEFAULT_CONFIG = {
-    "staff_roles": ["staff", "headstaff"],  # Updated to specified roles
+    "staff_roles": ["staff", "headstaff"],
     "member_role": "member",
     "apply_channel": "apply",
     "application_cooldown": 86400,  # 24 hours in seconds
@@ -491,6 +491,64 @@ async def approve(ctx, member: discord.Member):
         await ctx.send(
             embed=discord.Embed(
                 description=f"⚠️ Error processing application: {str(e)}",
+                color=discord.Color.red()
+            )
+        )
+
+@bot.command()
+@commands.check(has_staff_role)
+async def clear(ctx, status: str = "all"):
+    """Clear applications by status (pending, approved, declined, or all)"""
+    if status not in ["pending", "approved", "declined", "all"]:
+        await ctx.send(
+            embed=discord.Embed(
+                description="❗ Invalid status. Use: pending, approved, declined, or all",
+                color=discord.Color.red()
+            )
+        )
+        return
+
+    try:
+        global applications
+        before_count = len(applications)
+        
+        if status == "all":
+            applications.clear()
+        else:
+            applications = {
+                uid: app for uid, app in applications.items()
+                if app.get("status") != status
+            }
+        
+        save_applications()
+        cleared_count = before_count - len(applications)
+        
+        await ctx.send(
+            embed=discord.Embed(
+                description=f"✅ Cleared {cleared_count} application(s) with status '{status}'.",
+                color=discord.Color.green()
+            )
+        )
+        
+        # Optionally, clean up application messages in the apply channel
+        apply_channel = discord.utils.get(ctx.guild.text_channels, name=config["apply_channel"])
+        if apply_channel and cleared_count > 0:
+            async for message in apply_channel.history(limit=100):
+                if message.embeds and "Application submitted by" in message.embeds[0].description:
+                    user_id = message.embeds[0].footer.text.split("User ID: ")[-1]
+                    if (status == "all" or (user_id in applications and applications[user_id]["status"] != status) or user_id not in applications):
+                        try:
+                            await message.delete()
+                        except discord.Forbidden:
+                            print(f"Error deleting application message for user {user_id}: Missing permissions")
+                        except discord.NotFound:
+                            pass
+                            
+    except Exception as e:
+        print(f"Error in clear command: {str(e)}")
+        await ctx.send(
+            embed=discord.Embed(
+                description=f"⚠️ Error clearing applications: {str(e)}",
                 color=discord.Color.red()
             )
         )
