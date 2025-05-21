@@ -6,7 +6,7 @@ import re
 import os
 import json
 import logging
-from dotenv import load_dotenv
+from .env import load_dotenv
 from typing import Optional, Dict, List, Union
 
 # Set up logging
