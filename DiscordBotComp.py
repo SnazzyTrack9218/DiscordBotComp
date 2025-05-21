@@ -69,6 +69,23 @@ def has_staff_role(member_or_ctx):
     """Check if a member or context author has a staff role"""
     member = member_or_ctx if isinstance(member_or_ctx, discord.Member) else member_or_ctx.author
     return any(role.name.lower() in config["staff_roles"] for role in member.roles)
+    
+@bot.event
+async def on_member_join(member):
+    embed = discord.Embed(
+        title=f"Welcome {member.display_name}!",
+        description="Thanks for joining our Project Zomboid server community!",
+        color=discord.Color.blue()
+    )
+    embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+    account_age = (datetime.now(tz=member.created_at.tzinfo) - member.created_at).days
+    embed.add_field(name="Account Age", value=f"{account_age} days" if account_age < 365 else f"{account_age // 365} years", inline=True)
+    embed.add_field(name="Joined", value=f"<t:{int(datetime.now().timestamp())}:R>", inline=True)
+    embed.set_footer(text=f"Please use the !apply command in the #{config['apply_channel']} channel to join.")
+    
+    channel = member.guild.system_channel or discord.utils.get(member.guild.text_channels, name="welcome")
+    if channel and channel.permissions_for(member.guild.me).send_messages:
+        await channel.send(embed=embed)
 
 class ApproveDeclineView(discord.ui.View):
     def __init__(self, applicant_id, application_data):
