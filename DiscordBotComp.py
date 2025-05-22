@@ -99,7 +99,7 @@ async def update_server_status():
         color=discord.Color.green() if status["online"] else discord.Color.red(),
         timestamp=datetime.now()
     )
-    embed.add_field(name="Status",一声 "Online" if status["online"] else "Offline", inline=True)
+    embed.add_field(name="Status", value="Online" if status["online"] else "Offline", inline=True)
     embed.add_field(name="Players", value=f"{status['player_count']}/{status['max_players']}", inline=True)
     embed.set_footer(text="Last updated")
 
@@ -118,7 +118,7 @@ async def on_ready():
     load_applications()
     await bot.change_presence(activity=discord.Game(name="Project Zomboid"))
     update_server_status.start()
-    
+
 @bot.event
 async def on_member_join(member):
     embed = discord.Embed(
@@ -295,29 +295,6 @@ class DeclineReasonModal(discord.ui.Modal, title="Decline Application"):
                 f"⚠️ Error processing application: {str(e)}", 
                 ephemeral=True
             )
-
-@bot.event
-async def on_ready():
-    print(f'{bot.user} is connected to Discord!')
-    load_applications()
-    await bot.change_presence(activity=discord.Game(name="Project Zomboid"))
-
-@bot.event
-async def on_member_join(member):
-    embed = discord.Embed(
-        title=f"Welcome {member.display_name}!",
-        description="Thanks for joining our Project Zomboid server community!",
-        color=discord.Color.blue()
-    )
-    embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
-    account_age = (datetime.now(tz=member.created_at.tzinfo) - member.created_at).days
-    embed.add_field(name="Account Age", value=f"{account_age} days" if account_age < 365 else f"{account_age // 365} years", inline=True)
-    embed.add_field(name="Joined", value=f"<t:{int(datetime.now().timestamp())}:R>", inline=True)
-    embed.set_footer(text=f"Please use the !apply command in the #{config['apply_channel']} channel to join.")
-    
-    channel = member.guild.system_channel or discord.utils.get(member.guild.text_channels, name="welcome")
-    if channel and channel.permissions_for(member.guild.me).send_messages:
-        await channel.send(embed=embed)
 
 @bot.command()
 async def apply(ctx):
@@ -596,7 +573,6 @@ async def clear(ctx, status: str = "all"):
             )
         )
         
-        # Optionally, clean up application messages in the apply channel
         apply_channel = discord.utils.get(ctx.guild.text_channels, name=config["apply_channel"])
         if apply_channel and cleared_count > 0:
             async for message in apply_channel.history(limit=100):
