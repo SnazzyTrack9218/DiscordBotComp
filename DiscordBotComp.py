@@ -95,7 +95,7 @@ async def update_server_status():
 
     status = await get_server_status()
     embed = discord.Embed(
-        title=status["server_name"],
+        title="My Zomboid Server",  # Change this to your desired server name
         color=discord.Color.green() if status["online"] else discord.Color.red(),
         timestamp=datetime.now()
     )
