@@ -39,12 +39,20 @@ server_status_message = None
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r') as f:
-            return json.load(f)
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                content = f.read().strip()
+                if content:
+                    return json.load(f)
+                print("Empty config.json, creating default")
+        except json.JSONDecodeError:
+            print("Invalid config.json, creating default")
     else:
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(DEFAULT_CONFIG, f, indent=4)
-        return DEFAULT_CONFIG
+        print("No config.json, creating default")
+    
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(DEFAULT_CONFIG, f, indent=4)
+    return DEFAULT_CONFIG
 
 def save_config(config):
     with open(CONFIG_FILE, 'w') as f:
