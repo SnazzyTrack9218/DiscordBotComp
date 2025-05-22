@@ -94,7 +94,7 @@ async def get_server_status():
         print(f"Error fetching server status: {str(e)}")
         return {"online": False, "player_count": 0, "max_players": 0, "server_name": "Project Zomboid Server"}
 
-@tasks.loop(minutes=5.0)
+@tasks.loop(minutes=1.0)
 async def update_server_status():
     global server_status_message
     channel = bot.get_channel(int(config["status_channel_id"]))
