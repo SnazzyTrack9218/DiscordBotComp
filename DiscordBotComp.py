@@ -23,7 +23,8 @@ DEFAULT_CONFIG = {
     "min_hours": 0,
     "server_ip": "89.28.237.41",
     "server_port": "16269",
-    "status_channel_id": "1374917255556628492"
+    "status_channel_id": "1374917255556628492",
+    "server_name": "HotBoxInZ"  # Added server_name
 }
 
 # Bot setup
@@ -95,7 +96,7 @@ async def update_server_status():
 
     status = await get_server_status()
     embed = discord.Embed(
-        title="My Zomboid Server",  # Change this to your desired server name
+        title=config["server_name"],  # Use server_name from config
         color=discord.Color.green() if status["online"] else discord.Color.red(),
         timestamp=datetime.now()
     )
