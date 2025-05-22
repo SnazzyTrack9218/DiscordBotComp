@@ -1,11 +1,12 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import asyncio
 import re
 import json
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+import a2s  # For Source Query Protocol
 
 # Load environment variables
 load_dotenv()
@@ -18,8 +19,11 @@ DEFAULT_CONFIG = {
     "staff_roles": ["staff", "headstaff"],
     "member_role": "member",
     "apply_channel": "apply",
-    "application_cooldown": 86400,  # 24 hours in seconds
-    "min_hours": 0
+    "application_cooldown": 86400,
+    "min_hours": 0,
+    "server_ip": "89.28.237.41",
+    "server_port": "16269",
+    "status_channel_id": "1374917255556628492"
 }
 
 # Bot setup
@@ -29,10 +33,10 @@ intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Data storage
-applications = {}  # Store pending applications in memory
+applications = {}
+server_status_message = None
 
 def load_config():
-    """Load config from file or create with defaults"""
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
             return json.load(f)
@@ -42,14 +46,12 @@ def load_config():
         return DEFAULT_CONFIG
 
 def save_config(config):
-    """Save config to file"""
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=4)
 
 config = load_config()
 
 def save_applications():
-    """Save applications to a JSON file"""
     with open('applications.json', 'w') as f:
         json.dump(applications, f, indent=4)
 
@@ -66,9 +68,56 @@ def load_applications():
         save_applications()
 
 def has_staff_role(member_or_ctx):
-    """Check if a member or context author has a staff role"""
     member = member_or_ctx if isinstance(member_or_ctx, discord.Member) else member_or_ctx.author
     return any(role.name.lower() in config["staff_roles"] for role in member.roles)
+
+async def get_server_status():
+    try:
+        server_address = (config["server_ip"], int(config["server_port"]))
+        info = await a2s.ainfo(server_address)
+        return {
+            "online": True,
+            "player_count": info.player_count,
+            "max_players": info.max_players,
+            "server_name": info.server_name or "Project Zomboid Server"
+        }
+    except Exception as e:
+        print(f"Error fetching server status: {str(e)}")
+        return {"online": False, "player_count": 0, "max_players": 0, "server_name": "Project Zomboid Server"}
+
+@tasks.loop(minutes=5.0)
+async def update_server_status():
+    global server_status_message
+    channel = bot.get_channel(int(config["status_channel_id"]))
+    if not channel:
+        print(f"Error: Channel {config['status_channel_id']} not found")
+        return
+
+    status = await get_server_status()
+    embed = discord.Embed(
+        title=status["server_name"],
+        color=discord.Color.green() if status["online"] else discord.Color.red(),
+        timestamp=datetime.now()
+    )
+    embed.add_field(name="Status",一声 "Online" if status["online"] else "Offline", inline=True)
+    embed.add_field(name="Players", value=f"{status['player_count']}/{status['max_players']}", inline=True)
+    embed.set_footer(text="Last updated")
+
+    try:
+        if server_status_message:
+            await server_status_message.edit(embed=embed)
+        else:
+            server_status_message = await channel.send(embed=embed)
+    except Exception as e:
+        print(f"Error updating server status message: {str(e)}")
+        server_status_message = None
+
+@bot.event
+async def on_ready():
+    print(f'{bot.user} is connected to Discord!')
+    load_applications()
+    await bot.change_presence(activity=discord.Game(name="Project Zomboid"))
+    update_server_status.start()
     
 @bot.event
 async def on_member_join(member):
