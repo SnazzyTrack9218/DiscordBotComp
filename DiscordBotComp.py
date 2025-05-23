@@ -621,7 +621,7 @@ async def apply_command(ctx):
             fields=[
                 {
                     "name": "📝 Step 1 of 3",
-                    "value": "Please provide your **Steam profile link**\n\n*Example: https://steamcommunity.com/id/yourname*",
+                    "value": "Please provide your **Steam profile link**",
                     "inline": False
                 }
             ]
