@@ -166,6 +166,44 @@ async def get_server_status():
             "players": []
         }
 
+async def get_server_status():
+    """Get server status using A2S protocol"""
+    try:
+        server_address = (config["server_ip"], int(config["server_port"]))
+        info = await a2s.ainfo(server_address)
+        players = await a2s.aplayers(server_address)
+        
+        # Get performance metrics
+        fps = getattr(info, 'fps', 'N/A')  # Server FPS if available
+        ping = getattr(info, 'ping', 'N/A')  # Server ping if available
+
+        
+        return {
+            "online": True,
+            "player_count": info.player_count,
+            "max_players": info.max_players,
+            "server_name": info.server_name or config["server_name"],
+            "players": players,
+            "performance": {
+                "fps": fps,
+                "ping": ping,
+            }
+        }
+    except Exception as e:
+        print(f"Error fetching server status: {str(e)}")
+        return {
+            "online": False,
+            "player_count": 0,
+            "max_players": 0,
+            "server_name": config["server_name"],
+            "players": [],
+            "performance": {
+                "fps": "N/A",
+                "ping": "N/A", 
+                "cpu_usage": "N/A"
+            }
+        }
+
 def create_status_embed(status, requester=None):
     """Create server status embed"""
     color = discord.Color.green() if status["online"] else discord.Color.red()
