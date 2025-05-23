@@ -24,7 +24,8 @@ DEFAULT_CONFIG = {
     "server_ip": "89.28.237.41",
     "server_port": "16269",
     "status_channel_id": "1374917255556628492",
-    "server_name": "HotBoxInZ"  # Added server_name
+    "server_name": "HotBoxInZ",  # Added server_name
+    "status_command_cooldown": 30
 }
 
 # Bot setup
@@ -84,15 +85,24 @@ async def get_server_status():
     try:
         server_address = (config["server_ip"], int(config["server_port"]))
         info = await a2s.ainfo(server_address)
+        players = await a2s.aplayers(server_address)
+        
         return {
             "online": True,
             "player_count": info.player_count,
             "max_players": info.max_players,
-            "server_name": info.server_name or "Project Zomboid Server"
+            "server_name": info.server_name or config["server_name"],
+            "players": players
         }
     except Exception as e:
         print(f"Error fetching server status: {str(e)}")
-        return {"online": False, "player_count": 0, "max_players": 0, "server_name": "Project Zomboid Server"}
+        return {
+            "online": False,
+            "player_count": 0,
+            "max_players": 0,
+            "server_name": config["server_name"],
+            "players": []
+        }
 
 @tasks.loop(minutes=1.0)
 async def update_server_status():
@@ -104,12 +114,18 @@ async def update_server_status():
 
     status = await get_server_status()
     embed = discord.Embed(
-        title=config["server_name"],  # Use server_name from config
+        title=f"{status['server_name']} Status",
         color=discord.Color.green() if status["online"] else discord.Color.red(),
         timestamp=datetime.now()
     )
-    embed.add_field(name="Status", value="Online" if status["online"] else "Offline", inline=True)
+    
+    embed.add_field(name="Status", value="✅ Online" if status["online"] else "❌ Offline", inline=True)
     embed.add_field(name="Players", value=f"{status['player_count']}/{status['max_players']}", inline=True)
+    
+    if status["online"] and status["player_count"] > 0 and status["player_count"] <= 20:
+        player_list = "\n".join([f"{p.name}" for p in status["players"]])
+        embed.add_field(name="Current Players", value=player_list, inline=False)
+    
     embed.set_footer(text="Last updated")
 
     try:
@@ -120,6 +136,52 @@ async def update_server_status():
     except Exception as e:
         print(f"Error updating server status message: {str(e)}")
         server_status_message = None
+
+@bot.command()
+@commands.cooldown(1, config.get("status_command_cooldown", 30), commands.BucketType.user)
+async def status(ctx):
+    """Check the current server status and player list"""
+    async with ctx.typing():
+        status = await get_server_status()
+        
+        embed = discord.Embed(
+            title=f"{status['server_name']} Status",
+            color=discord.Color.green() if status["online"] else discord.Color.red(),
+            timestamp=datetime.now()
+        )
+        
+        embed.add_field(name="Status", value="✅ Online" if status["online"] else "❌ Offline", inline=True)
+        embed.add_field(name="Players", value=f"{status['player_count']}/{status['max_players']}", inline=True)
+        
+        if status["online"] and status["player_count"] > 0:
+            if status["player_count"] <= 15:
+                player_list = "\n".join([f"{p.name}" for p in status["players"]])
+                embed.add_field(name="Current Players", value=player_list or "None", inline=False)
+            else:
+                embed.add_field(name="Players", value=f"{status['player_count']} players online", inline=False)
+        
+        embed.set_footer(text=f"Requested by {ctx.author.name} | Cooldown: {config.get('status_command_cooldown', 30)}s")
+        
+        await ctx.send(embed=embed)
+
+@status.error
+async def status_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        retry_after = round(error.retry_after)
+        await ctx.send(
+            embed=discord.Embed(
+                description=f"⏳ Please wait {retry_after} seconds before checking the status again.",
+                color=discord.Color.orange()
+            ),
+            delete_after=10
+        )
+    else:
+        await ctx.send(
+            embed=discord.Embed(
+                description=f"⚠️ An error occurred: {str(error)}",
+                color=discord.Color.red()
+            )
+        )
 
 @bot.event
 async def on_ready():
@@ -673,6 +735,13 @@ async def config_set(ctx, setting: str, *, value: str):
         
     save_config(config)
     await ctx.send(f"✅ Updated {setting} to: {config[setting]}")
+
+@bot.event
+async def on_ready():
+    print(f'{bot.user} is connected to Discord!')
+    load_applications()
+    await bot.change_presence(activity=discord.Game(name="Project Zomboid"))
+    update_server_status.start()  # Start the status update loop
 
 # Run the bot
 if __name__ == "__main__":
