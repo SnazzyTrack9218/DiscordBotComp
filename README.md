@@ -1,24 +1,44 @@
 # Project Zomboid Discord Application Bot
 
-A Discord bot for managing Project Zomboid server applications with a streamlined application process, staff workflow, and role management.
+A comprehensive Discord bot for managing Project Zomboid server applications with streamlined application processing, staff workflow, role management, and real-time server status monitoring.
+
+![Bot Preview](https://via.placeholder.com/800x400?text=Project+Zomboid+Discord+Bot+Preview)
 
 ## Features
 
-- **Application System**: Users apply to join the server via `!apply`, providing a Steam profile link and hours played.
-- **Staff Workflow**: Staff with `staff` or `headstaff` roles can approve or decline applications using buttons or the `!approve` command.
-- **Role Management**: Automatically assigns the `member` role to approved users.
-- **Application Tracking**: View pending, approved, or declined applications with `!applications`.
-- **Cooldown System**: Configurable cooldown prevents reapplication after a decline (default: 24 hours).
-- **Clear Applications**: Staff can clear applications by status (`!clear`) to manage application history.
-- **Secure Configuration**: Uses a `.env` file for the Discord bot token and `config.json` for settings.
-- **User-Friendly**: Guided application process via direct messages with error handling.
-- **Logging**: Errors and events are logged to `bot.log` for debugging.
+### Application System
+- **User Applications**: Members apply via `!apply` with Steam profile and playtime
+- **Guided Process**: Step-by-step application via DMs with validation
+- **Cooldown System**: Configurable cooldown prevents reapplication after decline (default: 24 hours)
 
-*Note*: Features like customizable questions (`!add_question`, `!remove_question`) and detailed application views (`!application_details`) are planned but not yet implemented.
+### Staff Tools
+- **Approval System**: Staff approve/decline with buttons or `!approve` command
+- **Application Review**: View applications by status (`!applications pending`)
+- **Management**: Clear applications by status (`!clear declined`)
+
+### Server Integration
+- **Real-time Status**: `!status` shows current player count and online players
+- **Auto Updates**: Channel message automatically updates with server status
+- **Player List**: Displays currently online players (when <15 online)
+
+### Role Management
+- **Auto Role Assignment**: Approved users get member role automatically
+- **Staff Permissions**: Configurable staff roles in config.json
+
+### Configuration
+- **Secure Setup**: `.env` for bot token, `config.json` for settings
+- **Customizable**: Adjust cooldowns, required roles, and channels
+- **Persistent Data**: Applications saved between bot restarts
 
 ## Installation
 
-1. **Clone the Repository**:
+### Prerequisites
+- Python 3.8+
+- Discord bot token
+- Project Zomboid server IP and query port
+
+### Setup
+1. Clone the repository:
    ```bash
    git clone https://github.com/SnazzyTrack9218/DiscordBotComp.git
    cd DiscordBotComp
