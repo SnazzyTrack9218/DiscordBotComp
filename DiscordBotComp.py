@@ -171,8 +171,11 @@ def create_status_embed(status, requester=None):
     color = discord.Color.green() if status["online"] else discord.Color.red()
     status_text = "🟢 Online" if status["online"] else "🔴 Offline"
     
+    # Force server name to "HotBoxInZ"
+    server_name = "HotBoxInZ"
+    
     embed = create_embed(
-        title=f"🎮 {status['server_name']} Server Status",
+        title=f"🎮 {server_name} Server Status",
         description=f"**Status:** {status_text}\n**Players:** {status['player_count']}/{status['max_players']}",
         color=color,
         timestamp=True
@@ -934,7 +937,7 @@ async def approve_command(ctx, member: discord.Member):
             timestamp=True
         )
         
-        # Send approval DM
+        # Send approval 
         try:
             dm_embed = create_embed(
                 title="🎉 Application Approved!",
