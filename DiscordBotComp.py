@@ -178,13 +178,6 @@ def create_status_embed(status, requester=None):
         timestamp=True
     )
     
-    # Add server info
-    embed.add_field(
-        name="📡 Server Info",
-        value=f"**IP:** `{config['server_ip']}:{config['server_port']}`\n**Game:** Project Zomboid",
-        inline=True
-    )
-    
     # Add player list if online and not too many players
     if status["online"] and status["player_count"] > 0:
         if status["player_count"] <= 15:
