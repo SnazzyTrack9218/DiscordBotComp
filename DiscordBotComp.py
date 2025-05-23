@@ -166,6 +166,30 @@ async def get_server_status():
             "players": []
         }
 
+async def get_server_uptime():
+    """Get server uptime in seconds"""
+    try:
+        server_address = (config["server_ip"], int(config["server_port"]))
+        info = await a2s.ainfo(server_address)
+        uptime = getattr(info, 'time', 0)  # Get uptime if available
+        return uptime
+    except Exception as e:
+        print(f"Error fetching server uptime: {str(e)}")
+        return 0
+
+def format_uptime(seconds):
+    """Format uptime into days, hours, minutes"""
+    days = int(seconds // 86400)
+    hours = int((seconds % 86400) // 3600)
+    minutes = int((seconds % 3600) // 60)
+    
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m"
+    elif hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
 async def get_server_status():
     """Get server status using A2S protocol"""
     try:
