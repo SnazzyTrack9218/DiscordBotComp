@@ -99,6 +99,9 @@ def create_embed(title, description, color, **kwargs):
     if 'footer' in kwargs:
         embed.set_footer(text=kwargs['footer'])
     
+    if 'thumbnail' in kwargs:
+        embed.set_thumbnail(url=kwargs['thumbnail'])
+    
     if 'fields' in kwargs:
         for field in kwargs['fields']:
             embed.add_field(
@@ -249,6 +252,36 @@ class RulesConfirmationView(discord.ui.View):
     async def confirm_button(self, interaction, button):
         """Handle rules confirmation"""
         self.confirmed = True
+        self.stop()
+        await interaction.response.defer()
+
+class ApplicationConfirmationView(discord.ui.View):
+    """View for application confirmation button"""
+    def __init__(self, user_id):
+        super().__init__(timeout=300.0)
+        self.user_id = user_id
+        self.confirmed = False
+
+    async def interaction_check(self, interaction):
+        """Check if the correct user is interacting"""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "❌ This button is for another user.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="✅ Submit Application", style=discord.ButtonStyle.green)
+    async def confirm_button(self, interaction, button):
+        """Handle application confirmation"""
+        self.confirmed = True
+        self.stop()
+        await interaction.response.defer()
+
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red)
+    async def cancel_button(self, interaction, button):
+        """Handle application cancellation"""
+        self.confirmed = False
         self.stop()
         await interaction.response.defer()
 
@@ -618,13 +651,10 @@ async def get_hours_played(user, dm_channel):
         return None
 
 async def confirm_application(user, dm_channel, steam_link, hours_played):
-    """Confirm application details with user"""
-    def check(m):
-        return m.author == user and m.channel == dm_channel
-    
+    """Confirm application details with user using a button"""
     embed = create_embed(
         title="📝 Step 3 of 3: Confirm Application",
-        description="Please review your application details below. Type **I confirm** to submit, or anything else to cancel.",
+        description="Please review your application details below and click the button to submit or cancel.",
         color=discord.Color.blue(),
         fields=[
             {
@@ -639,13 +669,19 @@ async def confirm_application(user, dm_channel, steam_link, hours_played):
             }
         ]
     )
-    await dm_channel.send(embed=embed)
+    view = ApplicationConfirmationView(user.id)
+    await dm_channel.send(embed=embed, view=view)
     
-    try:
-        confirm_msg = await bot.wait_for('message', check=check, timeout=300.0)
-        return confirm_msg.content.lower() == 'i confirm'
-    except asyncio.TimeoutError:
+    await view.wait()
+    if not view.confirmed:
+        embed = create_embed(
+            title="❌ Application Cancelled",
+            description="You cancelled the application process.",
+            color=discord.Color.red()
+        )
+        await dm_channel.send(embed=embed)
         return False
+    return True
 
 async def submit_application(ctx, steam_link, hours_played):
     """Submit the application to staff"""
