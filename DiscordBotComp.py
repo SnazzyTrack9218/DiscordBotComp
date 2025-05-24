@@ -125,9 +125,8 @@ async def get_server_status():
     """Get server status using A2S protocol with enhanced error handling"""
     try:
         server_address = (config["server_ip"], int(config["server_port"]))
-        async with asyncio.timeout(5):  # Set a 5-second timeout
-            info = await a2s.ainfo(server_address)
-            players = await a2s.aplayers(server_address)
+        info = await asyncio.wait_for(a2s.ainfo(server_address), timeout=5)
+        players = await asyncio.wait_for(a2s.aplayers(server_address), timeout=5)
         
         return {
             "online": True,
