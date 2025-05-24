@@ -496,7 +496,7 @@ async def apply_command(ctx):
         
         await dm_channel.send(embed=create_embed(
             title="📋 Application Process",
-            description="Please answer the following questions.",
+            description="Please follow the prompts to complete your application for the Project Zomboid server.\nYou will need to provide:\n1. Your Steam profile link\n2. Your Project Zomboid play hours\nYou have 5 minutes to respond to each prompt.",
             color=discord.Color.blue()
         ))
         
@@ -516,14 +516,14 @@ async def apply_command(ctx):
     except asyncio.TimeoutError:
         embed = create_embed(
             title="⏱️ Timeout",
-            description="You took too long to respond.",
+            description="You took too long to respond. Please restart the application process with !apply.",
             color=discord.Color.red()
         )
         await dm_channel.send(embed=embed)
     except discord.Forbidden:
         embed = create_embed(
             title="📬 DM Error",
-            description="Please enable DMs from server members.",
+            description="Please enable DMs from server members to complete the application process.",
             color=discord.Color.red()
         )
         await ctx.send(f"{ctx.author.mention}", embed=embed, delete_after=15)
@@ -532,6 +532,13 @@ async def get_steam_profile(user, dm_channel):
     """Get and validate Steam profile from user"""
     def check(m):
         return m.author == user and m.channel == dm_channel
+    
+    embed = create_embed(
+        title="🔗 Steam Profile Link",
+        description="Please provide your Steam profile link (e.g., https://steamcommunity.com/id/yourprofile or https://steamcommunity.com/profiles/123456789).\nEnsure the link is valid and publicly accessible.",
+        color=discord.Color.blue()
+    )
+    await dm_channel.send(embed=embed)
     
     while True:
         try:
@@ -543,7 +550,7 @@ async def get_steam_profile(user, dm_channel):
             
             embed = create_embed(
                 title="❌ Invalid Steam Profile",
-                description="Please provide a valid Steam profile link.",
+                description="Please provide a valid Steam profile link (e.g., https://steamcommunity.com/id/yourprofile).",
                 color=discord.Color.red()
             )
             await dm_channel.send(embed=embed)
@@ -557,8 +564,8 @@ async def get_hours_played(user, dm_channel):
         return m.author == user and m.channel == dm_channel
     
     embed = create_embed(
-        title="📋 Hours Played",
-        description="How many hours have you played Project Zomboid?",
+        title="⏱️ Project Zomboid Hours",
+        description=f"Please enter the number of hours you have played Project Zomboid.\nYou can find this in your Steam library or profile.\nMinimum required hours: {config['min_hours']}",
         color=discord.Color.blue()
     )
     await dm_channel.send(embed=embed)
@@ -576,7 +583,7 @@ async def confirm_application(user, dm_channel, steam_link, hours_played):
     
     embed = create_embed(
         title="📋 Confirm Application",
-        description="Please review your application details:",
+        description="Please review your application details below. Type **I confirm** to submit, or anything else to cancel.",
         color=discord.Color.blue(),
         fields=[
             {
@@ -648,7 +655,7 @@ async def submit_application(ctx, steam_link, hours_played):
         
         success_embed = create_embed(
             title="✅ Application Submitted",
-            description="Your application has been submitted.",
+            description="Your application has been submitted and is pending review by staff.",
             color=discord.Color.green()
         )
         await ctx.author.send(embed=success_embed)
