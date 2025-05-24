@@ -122,11 +122,12 @@ def format_time_remaining(seconds):
 
 # Server Status Functions
 async def get_server_status():
-    """Get server status using A2S protocol"""
+    """Get server status using A2S protocol with enhanced error handling"""
     try:
         server_address = (config["server_ip"], int(config["server_port"]))
-        info = await a2s.ainfo(server_address)
-        players = await a2s.aplayers(server_address)
+        async with asyncio.timeout(5):  # Set a 5-second timeout
+            info = await a2s.ainfo(server_address)
+            players = await a2s.aplayers(server_address)
         
         return {
             "online": True,
@@ -135,6 +136,26 @@ async def get_server_status():
             "server_name": "HotBoxInZ",
             "players": players
         }
+    except asyncio.TimeoutError:
+        print(f"Server status request timed out for {config['server_ip']}:{config['server_port']}")
+        return {
+            "online": False,
+            "player_count": 0,
+            "max_players": 0,
+            "server_name": "HotBoxInZ",
+            "players": [],
+            "error": "Request timed out. Server may be unreachable."
+        }
+    except ValueError as e:
+        print(f"Invalid server configuration: {str(e)}")
+        return {
+            "online": False,
+            "player_count": 0,
+            "max_players": 0,
+            "server_name": "HotBoxInZ",
+            "players": [],
+            "error": "Invalid IP or port configuration."
+        }
     except Exception as e:
         print(f"Error fetching server status: {str(e)}")
         return {
@@ -142,7 +163,8 @@ async def get_server_status():
             "player_count": 0,
             "max_players": 0,
             "server_name": "HotBoxInZ",
-            "players": []
+            "players": [],
+            "error": f"Unexpected error: {str(e)}"
         }
 
 def create_status_embed(status, requester=None):
@@ -150,9 +172,13 @@ def create_status_embed(status, requester=None):
     color = discord.Color.green() if status["online"] else discord.Color.red()
     status_text = "🟢 Online" if status["online"] else "🔴 Offline"
     
+    description = f"**Status:** {status_text}\n**Players:** {status['player_count']}/{status['max_players']}"
+    if not status["online"] and "error" in status:
+        description += f"\n**Error:** {status['error']}"
+    
     embed = create_embed(
         title=f"🎮 {status['server_name']} Server Status",
-        description=f"**Status:** {status_text}\n**Players:** {status['player_count']}/{status['max_players']}",
+        description=description,
         color=color,
         timestamp=True
     )
