@@ -539,6 +539,39 @@ async def on_ready():
     await bot.change_presence(activity=discord.Game(name="Project Zomboid"))
     update_server_status.start()
 
+@bot.event
+async def on_member_join(member):
+    """Send welcome message to new members"""
+    welcome_channel = discord.utils.get(member.guild.text_channels, name=config["welcome_channel"])
+    if not welcome_channel:
+        print(f"Error: Welcome channel {config['welcome_channel']} not found")
+        return
+
+    # Calculate account age
+    account_age = (datetime.now() - member.created_at).days // 365
+    join_date = member.joined_at.strftime("%Y-%m-%d")
+    
+    # Create welcome embed
+    embed = create_embed(
+        title=f"🎉 Welcome {member.display_name}!",
+        description=(
+            f"Thanks for joining the **{config['server_name']}** server community!\n\n"
+            f"Please use the `!apply` command in the <#{discord.utils.get(member.guild.text_channels, name=config['apply_channel']).id}> channel to join."
+        ),
+        color=discord.Color.green(),
+        fields=[
+            {"name": "Account Age", "value": f"{account_age} years", "inline": True},
+            {"name": "Joined", "value": f"{join_date}", "inline": True}
+        ],
+        thumbnail=member.avatar.url if member.avatar else member.default_avatar.url
+    )
+    
+    try:
+        await welcome_channel.send(embed=embed)
+    except Exception as e:
+        print(f"Error sending welcome message: {str(e)}")
+
+
 # Application Commands
 @bot.command(name='apply', help='Apply to join the Project Zomboid server')
 async def apply_command(ctx):
