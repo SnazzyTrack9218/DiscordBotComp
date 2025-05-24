@@ -28,17 +28,7 @@ DEFAULT_CONFIG = {
     "status_command_cooldown": 30
 }
 
-# Bot setup
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
-
-# Data storage
-applications = {}
-server_status_message = None
-
-# Initialize configuration
+# Initialize configuration first
 def load_config():
     """Load configuration from file or create default"""
     if os.path.exists(CONFIG_FILE):
@@ -58,25 +48,18 @@ def load_config():
     return DEFAULT_CONFIG
 
 config = load_config()
-# Utility Functions
-def load_config():
-    """Load configuration from file or create default"""
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r') as f:
-                content = f.read().strip()
-                if content:
-                    return json.loads(content)
-                print("Empty config.json, creating default")
-        except json.JSONDecodeError:
-            print("Invalid config.json, creating default")
-    else:
-        print("No config.json, creating default")
-    
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(DEFAULT_CONFIG, f, indent=4)
-    return DEFAULT_CONFIG
 
+# Bot setup
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
+
+# Data storage
+applications = {}
+server_status_message = None
+
+# Utility Functions
 def save_config(config):
     """Save configuration to file"""
     with open(CONFIG_FILE, 'w') as f:
@@ -110,19 +93,15 @@ def create_embed(title, description, color, **kwargs):
     """Create a standardized embed"""
     embed = discord.Embed(title=title, description=description, color=color)
     
-    # Add timestamp if requested
     if kwargs.get('timestamp', False):
         embed.timestamp = datetime.now()
     
-    # Add footer if provided
     if 'footer' in kwargs:
         embed.set_footer(text=kwargs['footer'])
     
-    # Add thumbnail if provided
     if 'thumbnail' in kwargs:
         embed.set_thumbnail(url=kwargs['thumbnail'])
     
-    # Add fields if provided
     if 'fields' in kwargs:
         for field in kwargs['fields']:
             embed.add_field(
@@ -153,7 +132,7 @@ async def get_server_status():
             "online": True,
             "player_count": info.player_count,
             "max_players": info.max_players,
-            "server_name": info.server_name or config["server_name"],
+            "server_name": "HotBoxInZ",  # Force server name
             "players": players
         }
     except Exception as e:
@@ -162,70 +141,8 @@ async def get_server_status():
             "online": False,
             "player_count": 0,
             "max_players": 0,
-            "server_name": config["server_name"],
+            "server_name": "HotBoxInZ",
             "players": []
-        }
-
-async def get_server_uptime():
-    """Get server uptime in seconds"""
-    try:
-        server_address = (config["server_ip"], int(config["server_port"]))
-        info = await a2s.ainfo(server_address)
-        uptime = getattr(info, 'time', 0)  # Get uptime if available
-        return uptime
-    except Exception as e:
-        print(f"Error fetching server uptime: {str(e)}")
-        return 0
-
-def format_uptime(seconds):
-    """Format uptime into days, hours, minutes"""
-    days = int(seconds // 86400)
-    hours = int((seconds % 86400) // 3600)
-    minutes = int((seconds % 3600) // 60)
-    
-    if days > 0:
-        return f"{days}d {hours}h {minutes}m"
-    elif hours > 0:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m"
-
-
-async def get_server_status():
-    """Get server status using A2S protocol"""
-    try:
-        server_address = (config["server_ip"], int(config["server_port"]))
-        info = await a2s.ainfo(server_address)
-        players = await a2s.aplayers(server_address)
-        
-        # Get performance metrics
-        fps = getattr(info, 'fps', 'N/A')  # Server FPS if available
-        ping = getattr(info, 'ping', 'N/A')  # Server ping if available
-
-        
-        return {
-            "online": True,
-            "player_count": info.player_count,
-            "max_players": info.max_players,
-            "server_name": info.server_name or config["server_name"],
-            "players": players,
-            "performance": {
-                "fps": fps,
-                "ping": ping,
-            }
-        }
-    except Exception as e:
-        print(f"Error fetching server status: {str(e)}")
-        return {
-            "online": False,
-            "player_count": 0,
-            "max_players": 0,
-            "server_name": config["server_name"],
-            "players": [],
-            "performance": {
-                "fps": "N/A",
-                "ping": "N/A", 
-                "cpu_usage": "N/A"
-            }
         }
 
 def create_status_embed(status, requester=None):
@@ -233,34 +150,13 @@ def create_status_embed(status, requester=None):
     color = discord.Color.green() if status["online"] else discord.Color.red()
     status_text = "🟢 Online" if status["online"] else "🔴 Offline"
     
-    # Force server name to "HotBoxInZ"
-    server_name = "HotBoxInZ"
-    
     embed = create_embed(
-        title=f"🎮 {server_name} Server Status",
+        title=f"🎮 {status['server_name']} Server Status",
         description=f"**Status:** {status_text}\n**Players:** {status['player_count']}/{status['max_players']}",
         color=color,
         timestamp=True
     )
     
-    # Add ping if available, format as integer ms
-    if status["online"] and "performance" in status and status["performance"].get("ping") not in (None, "N/A"):
-        try:
-            ping_val = status['performance']['ping']
-            ping_ms = int(round(float(ping_val)))
-            embed.add_field(
-                name="🏓 Ping",
-                value=f"{ping_ms} ms",
-                inline=True
-            )
-        except Exception:
-            embed.add_field(
-                name="🏓 Ping",
-                value=f"{status['performance']['ping']} ms",
-                inline=True
-            )
-    
-    # Add player list if online and not too many players
     if status["online"] and status["player_count"] > 0:
         if status["player_count"] <= 15:
             player_names = [p.name for p in status["players"]]
@@ -277,7 +173,6 @@ def create_status_embed(status, requester=None):
                 inline=False
             )
     
-    # Add footer based on context
     if requester:
         embed.set_footer(text=f"Requested by {requester} • Cooldown: {config.get('status_command_cooldown', 30)}s")
     else:
@@ -474,18 +369,6 @@ class ApproveDeclineView(discord.ui.View):
             inline=False
         )
         
-        embed.add_field(
-            name="🔗 Steam Profile",
-            value=self.application_data["steam_link"],
-            inline=True
-        )
-        
-        embed.add_field(
-            name="⏱️ Hours Played",
-            value=self.application_data["hours_played"],
-            inline=True
-        )
-        
         return embed
 
     async def _handle_approval(self, member, embed):
@@ -513,28 +396,16 @@ class ApproveDeclineView(discord.ui.View):
         else:
             embed.add_field(
                 name="⚠️ Role Error",
-                 value=f"Role '{config['member_role']}' not found",
+                value=f"Role '{config['member_role']}' not found",
                 inline=True
             )
-# Send DM to user
+
+        # Send DM to user
         try:
             dm_embed = create_embed(
                 title="🎉 Application Approved!",
-                description="Congratulations! Your application to join our Project Zomboid server has been **approved**!",
-                color=discord.Color.green(),
-                fields=[
-                    {
-                        "name": "🎮 What's Next?",
-                        "value": "You now have access to the server! Check out the server channels and join us in-game.",
-                        "inline": False
-                    },
-                    {
-                        "name": "📋 Server Info",
-                        "value": f"**IP:** `{config['server_ip']}:{config['server_port']}`\n**Name:** {config['server_name']}",
-                        "inline": False
-                    }
-                ],
-                timestamp=True
+                description="Your application has been approved!",
+                color=discord.Color.green()
             )
             await member.send(embed=dm_embed)
         except discord.Forbidden:
@@ -552,26 +423,8 @@ class ApproveDeclineView(discord.ui.View):
         try:
             dm_embed = create_embed(
                 title="📋 Application Update",
-                description="Your application to join our Project Zomboid server has been **declined**.",
-                color=discord.Color.red(),
-                fields=[
-                    {
-                        "name": "📝 Reason",
-                        "value": reason or "No specific reason provided",
-                        "inline": False
-                    },
-                    {
-                        "name": "🔄 Reapplication",
-                        "value": f"You can apply again in **{config['application_cooldown']//3600} hours**.",
-                        "inline": False
-                    },
-                    {
-                        "name": "❓ Questions?",
-                        "value": "Feel free to contact our staff if you have any questions about your application.",
-                        "inline": False
-                    }
-                ],
-                timestamp=True
+                description="Your application has been declined.",
+                color=discord.Color.red()
             )
             await member.send(embed=dm_embed)
         except discord.Forbidden:
@@ -608,48 +461,10 @@ async def on_ready():
     await bot.change_presence(activity=discord.Game(name="Project Zomboid"))
     update_server_status.start()
 
-@bot.event
-async def on_member_join(member):
-    """Welcome new members"""
-    account_age = (datetime.now(tz=member.created_at.tzinfo) - member.created_at).days
-    age_display = f"{account_age} days" if account_age < 365 else f"{account_age // 365} years"
-    
-    embed = create_embed(
-        title=f"👋 Welcome to {member.guild.name}!",
-        description=f"Welcome **{member.display_name}** to our Project Zomboid community!",
-        color=discord.Color.blue(),
-        thumbnail=member.avatar.url if member.avatar else member.default_avatar.url,
-        fields=[
-            {
-                "name": "📅 Account Age",
-                "value": age_display,
-                "inline": True
-            },
-            {
-                "name": "📥 Joined",
-                "value": f"<t:{int(datetime.now().timestamp())}:R>",
-                "inline": True
-            },
-            {
-                "name": "🎮 Getting Started",
-                "value": f"Use `!apply` in #{config['apply_channel']} to join our server!",
-                "inline": False
-            }
-        ],
-        timestamp=True,
-        footer=f"Member #{len(member.guild.members)}"
-    )
-    
-    # Send to system channel or welcome channel
-    channel = member.guild.system_channel or discord.utils.get(member.guild.text_channels, name="welcome")
-    if channel and channel.permissions_for(member.guild.me).send_messages:
-        await channel.send(embed=embed)
-
 # Application Commands
 @bot.command(name='apply', help='Apply to join the Project Zomboid server')
 async def apply_command(ctx):
     """Handle application command"""
-    # Check if in correct channel
     if ctx.channel.name != config["apply_channel"]:
         embed = create_embed(
             title="❌ Wrong Channel",
@@ -659,7 +474,6 @@ async def apply_command(ctx):
         await ctx.send(embed=embed, delete_after=10)
         return
     
-    # Delete command message
     try:
         await ctx.message.delete()
     except (discord.Forbidden, discord.NotFound):
@@ -671,83 +485,48 @@ async def apply_command(ctx):
     if user_id in applications and applications[user_id]["status"] == "pending":
         embed = create_embed(
             title="⏳ Application Pending",
-            description="You already have a pending application. Please wait for staff to review it.",
+            description="You already have a pending application.",
             color=discord.Color.orange()
         )
         await ctx.author.send(embed=embed)
         return
     
-    # Check cooldown for declined applications
-    if user_id in applications and applications[user_id]["status"] == "declined":
-        declined_time = datetime.fromisoformat(applications[user_id]["processed_at"])
-        elapsed_seconds = (datetime.now() - declined_time).total_seconds()
-        
-        if elapsed_seconds < config["application_cooldown"]:
-            time_left = config["application_cooldown"] - elapsed_seconds
-            embed = create_embed(
-                title="⏰ Application Cooldown",
-                description=f"Your previous application was declined. You can apply again in **{format_time_remaining(time_left)}**.",
-                color=discord.Color.red()
-            )
-            await ctx.author.send(embed=embed)
-            return
-    
     try:
         dm_channel = await ctx.author.create_dm()
         
-        # Start application process
         await dm_channel.send(embed=create_embed(
-            title="📋 Project Zomboid Server Application",
-            description="Welcome to the application process! Please answer the following questions.",
-            color=discord.Color.blue(),
-            fields=[
-                {
-                    "name": "📝 Step 1 of 3",
-                    "value": "Please provide your **Steam profile link**",
-                    "inline": False
-                }
-            ]
+            title="📋 Application Process",
+            description="Please answer the following questions.",
+            color=discord.Color.blue()
         ))
         
-        # Get Steam profile
         steam_link = await get_steam_profile(ctx.author, dm_channel)
         if not steam_link:
             return
         
-        # Get hours played
         hours_played = await get_hours_played(ctx.author, dm_channel)
         if not hours_played:
             return
         
-        # Confirm application
         if not await confirm_application(ctx.author, dm_channel, steam_link, hours_played):
             return
         
-        # Submit application
         await submit_application(ctx, steam_link, hours_played)
         
     except asyncio.TimeoutError:
         embed = create_embed(
-            title="⏱️ Application Timeout",
-            description="You took too long to respond. Please try again with `!apply`.",
+            title="⏱️ Timeout",
+            description="You took too long to respond.",
             color=discord.Color.red()
         )
         await dm_channel.send(embed=embed)
     except discord.Forbidden:
         embed = create_embed(
             title="📬 DM Error",
-            description="I couldn't send you a DM. Please enable DMs from server members and try again.",
+            description="Please enable DMs from server members.",
             color=discord.Color.red()
         )
         await ctx.send(f"{ctx.author.mention}", embed=embed, delete_after=15)
-    except Exception as e:
-        print(f"Error in apply command: {str(e)}")
-        embed = create_embed(
-            title="⚠️ Application Error",
-            description=f"An error occurred during your application: {str(e)}\n\nPlease try again or contact an admin.",
-            color=discord.Color.red()
-        )
-        await ctx.author.send(embed=embed)
 
 async def get_steam_profile(user, dm_channel):
     """Get and validate Steam profile from user"""
@@ -764,15 +543,8 @@ async def get_steam_profile(user, dm_channel):
             
             embed = create_embed(
                 title="❌ Invalid Steam Profile",
-                description="That doesn't look like a valid Steam profile link. Please try again.",
-                color=discord.Color.red(),
-                fields=[
-                    {
-                        "name": "✅ Valid Examples",
-                        "value": "• https://steamcommunity.com/id/yourname\n• https://steamcommunity.com/profiles/76561198000000000",
-                        "inline": False
-                    }
-                ]
+                description="Please provide a valid Steam profile link.",
+                color=discord.Color.red()
             )
             await dm_channel.send(embed=embed)
             
@@ -785,16 +557,9 @@ async def get_hours_played(user, dm_channel):
         return m.author == user and m.channel == dm_channel
     
     embed = create_embed(
-        title="📋 Step 2 of 3",
-        description="How many hours have you played **Project Zomboid**?",
-        color=discord.Color.blue(),
-        fields=[
-            {
-                "name": "💡 Tip",
-                "value": "You can find this information on your Steam profile or in your Steam library.",
-                "inline": False
-            }
-        ]
+        title="📋 Hours Played",
+        description="How many hours have you played Project Zomboid?",
+        color=discord.Color.blue()
     )
     await dm_channel.send(embed=embed)
     
@@ -810,8 +575,8 @@ async def confirm_application(user, dm_channel, steam_link, hours_played):
         return m.author == user and m.channel == dm_channel
     
     embed = create_embed(
-        title="📋 Step 3 of 3 - Confirm Application",
-        description="Please review your application details below:",
+        title="📋 Confirm Application",
+        description="Please review your application details:",
         color=discord.Color.blue(),
         fields=[
             {
@@ -823,16 +588,6 @@ async def confirm_application(user, dm_channel, steam_link, hours_played):
                 "name": "⏱️ Hours Played",
                 "value": hours_played,
                 "inline": True
-            },
-            {
-                "name": "📜 Server Rules",
-                "value": "By submitting this application, you confirm that you have read and agree to follow our server rules.",
-                "inline": False
-            },
-            {
-                "name": "✅ To Submit",
-                "value": "Type `I confirm` to submit your application.",
-                "inline": False
             }
         ]
     )
@@ -840,17 +595,7 @@ async def confirm_application(user, dm_channel, steam_link, hours_played):
     
     try:
         confirm_msg = await bot.wait_for('message', check=check, timeout=300.0)
-        if confirm_msg.content.lower() == 'i confirm':
-            return True
-        
-        embed = create_embed(
-            title="❌ Application Cancelled",
-            description="You didn't confirm the application. Please use `!apply` to start over.",
-            color=discord.Color.red()
-        )
-        await dm_channel.send(embed=embed)
-        return False
-        
+        return confirm_msg.content.lower() == 'i confirm'
     except asyncio.TimeoutError:
         return False
 
@@ -868,23 +613,20 @@ async def submit_application(ctx, steam_link, hours_played):
     applications[user_id] = application_data
     save_applications()
     
-    # Send to apply channel
     apply_channel = discord.utils.get(ctx.guild.text_channels, name=config["apply_channel"])
     if not apply_channel:
         embed = create_embed(
-            title="⚠️ Channel Error",
-            description="Application channel not found. Please contact an admin.",
+            title="⚠️ Error",
+            description="Application channel not found.",
             color=discord.Color.red()
         )
         await ctx.author.send(embed=embed)
         return
     
-    # Create staff application embed
     app_embed = create_embed(
-        title="📋 New Server Application",
-        description=f"**{ctx.author.display_name}** has submitted an application",
+        title="📋 New Application",
+        description=f"{ctx.author.display_name} has submitted an application",
         color=discord.Color.gold(),
-        thumbnail=ctx.author.avatar.url if ctx.author.avatar else ctx.author.default_avatar.url,
         fields=[
             {
                 "name": "👤 Applicant",
@@ -892,28 +634,11 @@ async def submit_application(ctx, steam_link, hours_played):
                 "inline": True
             },
             {
-                "name": "📅 Account Created",
-                "value": f"<t:{int(ctx.author.created_at.timestamp())}:R>",
-                "inline": True
-            },
-            {
                 "name": "🔗 Steam Profile",
                 "value": steam_link,
                 "inline": False
-            },
-            {
-                "name": "⏱️ Hours Played",
-                "value": hours_played,
-                "inline": True
-            },
-            {
-                "name": "📅 Submitted",
-                "value": f"<t:{int(datetime.now().timestamp())}:R>",
-                "inline": True
             }
-        ],
-        timestamp=True,
-        footer=f"Application ID: {ctx.author.id}"
+        ]
     )
     
     view = ApproveDeclineView(ctx.author.id, application_data)
@@ -921,32 +646,18 @@ async def submit_application(ctx, steam_link, hours_played):
     try:
         await apply_channel.send(embed=app_embed, view=view)
         
-        # Confirm to user
         success_embed = create_embed(
-            title="✅ Application Submitted!",
-            description="Your application has been successfully submitted to our staff team.",
-            color=discord.Color.green(),
-            fields=[
-                {
-                    "name": "⏳ What's Next?",
-                    "value": "Our staff will review your application and get back to you soon. You'll receive a DM with the decision.",
-                    "inline": False
-                },
-{
-                    "name": "📋 Application Details",
-                    "value": f"**Steam:** {steam_link}\n**Hours:** {hours_played}",
-                    "inline": False
-                }
-            ],
-            timestamp=True
+            title="✅ Application Submitted",
+            description="Your application has been submitted.",
+            color=discord.Color.green()
         )
         await ctx.author.send(embed=success_embed)
         
     except Exception as e:
         print(f"Error sending application: {str(e)}")
         error_embed = create_embed(
-            title="⚠️ Submission Error",
-            description="Could not send application to staff channel. Please contact an admin.",
+            title="⚠️ Error",
+            description="Could not send application.",
             color=discord.Color.red()
         )
         await ctx.author.send(embed=error_embed)
@@ -960,8 +671,8 @@ async def approve_command(ctx, member: discord.Member):
     
     if user_id not in applications or applications[user_id]["status"] != "pending":
         embed = create_embed(
-            title="❌ No Pending Application",
-            description=f"No pending application found for {member.mention}.",
+            title="❌ Error",
+            description="No pending application found.",
             color=discord.Color.red()
         )
         await ctx.send(embed=embed)
@@ -970,601 +681,94 @@ async def approve_command(ctx, member: discord.Member):
     application_data = applications[user_id]
     
     try:
-        # Assign member role
         member_role = discord.utils.get(ctx.guild.roles, name=config["member_role"])
-        role_status = "Role not found"
-        
         if member_role:
-            try:
-                await member.add_roles(member_role)
-                role_status = f"✅ Assigned {member_role.mention}"
-            except discord.Forbidden:
-                role_status = "❌ Failed to assign role (missing permissions)"
+            await member.add_roles(member_role)
         
-        # Create result embed
-        result_embed = create_embed(
-            title="✅ Application Approved",
-            description=f"Application for **{member.display_name}** has been approved!",
-            color=discord.Color.green(),
-            fields=[
-                {
-                    "name": "👤 Applicant",
-                    "value": f"{member.mention}\n`{member.id}`",
-                    "inline": True
-                },
-                {
-                    "name": "👨‍💼 Approved By",
-                    "value": ctx.author.mention,
-                    "inline": True
-                },
-                {
-                    "name": "🎭 Role Status",
-                    "value": role_status,
-                    "inline": True
-                },
-                {
-                    "name": "🔗 Steam Profile",
-                    "value": application_data["steam_link"],
-                    "inline": False
-                },
-                {
-                    "name": "⏱️ Hours Played",
-                    "value": application_data["hours_played"],
-                    "inline": True
-                }
-            ],
-            timestamp=True
-        )
-        
-        # Send approval 
-        try:
-            dm_embed = create_embed(
-                title="🎉 Application Approved!",
-                description="Congratulations! Your application has been **approved**!",
-                color=discord.Color.green(),
-                fields=[
-                    {
-                        "name": "🎮 Server Access",
-                        "value": f"**IP:** `{config['server_ip']}:{config['server_port']}`\n**Name:** {config['server_name']}",
-                        "inline": False
-                    },
-                    {
-                        "name": "📋 Next Steps",
-                        "value": "You now have access to all server channels. Welcome to the community!",
-                        "inline": False
-                    }
-                ],
-                timestamp=True
-            )
-            await member.send(embed=dm_embed)
-        except discord.Forbidden:
-            result_embed.add_field(
-                name="📬 DM Status",
-                value="❌ Could not send approval message to user",
-                inline=True
-            )
-        
-        # Update application data
         applications[user_id]["status"] = "approved"
         applications[user_id]["processed_by"] = str(ctx.author.id)
         applications[user_id]["processed_at"] = datetime.now().isoformat()
         save_applications()
         
-        await ctx.send(embed=result_embed)
+        embed = create_embed(
+            title="✅ Approved",
+            description=f"{member.mention}'s application has been approved.",
+            color=discord.Color.green()
+        )
+        await ctx.send(embed=embed)
         
     except Exception as e:
         print(f"Error in approve command: {str(e)}")
         error_embed = create_embed(
-            title="⚠️ Approval Error",
-            description=f"Error processing application: {str(e)}",
+            title="⚠️ Error",
+            description=f"Error: {str(e)}",
             color=discord.Color.red()
         )
         await ctx.send(embed=error_embed)
 
-@bot.command(name='applications', help='View applications by status (Staff only)')
-@commands.check(has_staff_role)
-async def applications_command(ctx, status: str = "pending"):
-    """View applications with specified status"""
-    valid_statuses = ["pending", "approved", "declined", "all"]
-    
-    if status not in valid_statuses:
-        embed = create_embed(
-            title="❌ Invalid Status",
-            description=f"Invalid status. Use: {', '.join(valid_statuses)}",
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed)
-        return
-    
-    # Filter applications
-    filtered_apps = {
-        uid: app for uid, app in applications.items()
-        if "status" in app and (status == "all" or app["status"] == status)
-    }
-    
-    if not filtered_apps:
-        embed = create_embed(
-            title="📋 No Applications Found",
-            description=f"No {status} applications found.",
-            color=discord.Color.blue()
-        )
-        await ctx.send(embed=embed)
-        return
-    
-    # Create applications embed
-    status_colors = {
-        "pending": discord.Color.orange(),
-        "approved": discord.Color.green(),
-        "declined": discord.Color.red(),
-        "all": discord.Color.blue()
-    }
-    
-    embed = create_embed(
-        title=f"📋 {status.capitalize()} Applications",
-        description=f"Found **{len(filtered_apps)}** application(s)",
-        color=status_colors.get(status, discord.Color.blue()),
-        timestamp=True
-    )
-    
-    # Add application details (limit to 10 for readability)
-    for i, (uid, app) in enumerate(list(filtered_apps.items())[:10]):
-        try:
-            user = await bot.fetch_user(int(uid))
-            username = f"{user.display_name} ({user.name})"
-        except:
-            username = f"Unknown User ({uid})"
-        
-        submitted_time = datetime.fromisoformat(app.get('submitted_at', datetime.now().isoformat()))
-        
-        field_value = f"**Steam:** {app.get('steam_link', 'N/A')[:50]}{'...' if len(app.get('steam_link', '')) > 50 else ''}\n"
-        field_value += f"**Hours:** {app.get('hours_played', 'N/A')}\n"
-        field_value += f"**Submitted:** <t:{int(submitted_time.timestamp())}:R>"
-        
-        if app.get("status") == "declined" and app.get("reason"):
-            field_value += f"\n**Reason:** {app['reason'][:50]}{'...' if len(app.get('reason', '')) > 50 else ''}"
-        
-        embed.add_field(
-            name=f"{i+1}. {username}",
-            value=field_value,
-            inline=False
-        )
-    
-    if len(filtered_apps) > 10:
-        embed.add_field(
-            name="📄 Note",
-            value=f"Showing first 10 of {len(filtered_apps)} applications",
-            inline=False
-        )
-    
-    await ctx.send(embed=embed)
-
-@bot.command(name='clear', help='Clear applications by status (Staff only)')
-@commands.check(has_staff_role)
-async def clear_command(ctx, status: str = "all"):
-    """Clear applications by status"""
-    valid_statuses = ["pending", "approved", "declined", "all"]
-    
-    if status not in valid_statuses:
-        embed = create_embed(
-            title="❌ Invalid Status",
-            description=f"Invalid status. Use: {', '.join(valid_statuses)}",
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed)
-        return
-
-    try:
-        global applications
-        before_count = len(applications)
-        
-        if status == "all":
-            applications.clear()
-        else:
-            applications = {
-                uid: app for uid, app in applications.items()
-                if app.get("status") != status
-            }
-        
-        save_applications()
-        cleared_count = before_count - len(applications)
-        
-        embed = create_embed(
-            title="🗑️ Applications Cleared",
-            description=f"Successfully cleared **{cleared_count}** application(s) with status '{status}'.",
-            color=discord.Color.green(),
-            fields=[
-                {
-                    "name": "📊 Summary",
-                    "value": f"**Before:** {before_count} applications\n**After:** {len(applications)} applications\n**Cleared:** {cleared_count} applications",
-                    "inline": False
-                }
-            ],
-            timestamp=True
-        )
-        await ctx.send(embed=embed)
-        
-        # Clean up application messages in apply channel
-        if cleared_count > 0:
-            apply_channel = discord.utils.get(ctx.guild.text_channels, name=config["apply_channel"])
-            if apply_channel:
-                deleted_messages = 0
-                async for message in apply_channel.history(limit=100):
-                    if (message.embeds and 
-                        "Application submitted by" in message.embeds[0].description and
-                        message.embeds[0].footer):
-                        
-                        user_id = message.embeds[0].footer.text.split("Application ID: ")[-1]
-                        should_delete = (status == "all" or 
-                                       user_id not in applications or 
-                                       (user_id in applications and applications[user_id]["status"] != status))
-                        
-                        if should_delete:
-                            try:
-                                await message.delete()
-                                deleted_messages += 1
-                            except (discord.Forbidden, discord.NotFound):
-                                pass
-                
-                if deleted_messages > 0:
-                    embed.add_field(
-                        name="🧹 Cleanup",
-                        value=f"Deleted {deleted_messages} application message(s) from #{apply_channel.name}",
-                        inline=False
-                    )
-                    await ctx.edit_original_response(embed=embed)
-                    
-    except Exception as e:
-        print(f"Error in clear command: {str(e)}")
-        error_embed = create_embed(
-            title="⚠️ Clear Error",
-            description=f"Error clearing applications: {str(e)}",
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=error_embed)
-
-# Configuration Commands
-@bot.command(name='config', help='View or modify bot configuration (Admin only)')
-@commands.has_permissions(administrator=True)
-async def config_command(ctx, setting: str = None, *, value: str = None):
-    """View or modify bot configuration"""
-    if setting is None:
-        # Display current configuration
-        embed = create_embed(
-            title="⚙️ Bot Configuration",
-            description="Current bot settings:",
-            color=discord.Color.blue(),
-            timestamp=True
-        )
-        
-        for key, val in config.items():
-            if isinstance(val, list):
-                display_value = ", ".join(val)
-            else:
-                display_value = str(val)
-            
-            embed.add_field(
-                name=f"🔧 {key}",
-                value=f"`{display_value}`",
-                inline=True
-            )
-        
-        embed.add_field(
-            name="📝 Usage",
-            value="Use `!config <setting> <value>` to modify settings",
-            inline=False
-        )
-        
-        await ctx.send(embed=embed)
-        return
-    
-    if setting not in config:
-        embed = create_embed(
-            title="❌ Unknown Setting",
-            description=f"Unknown setting: `{setting}`",
-            color=discord.Color.red(),
-            fields=[
-                {
-                    "name": "📋 Available Settings",
-                    "value": ", ".join(f"`{key}`" for key in config.keys()),
-                    "inline": False
-                }
-            ]
-        )
-        await ctx.send(embed=embed)
-        return
-    
-    if value is None:
-        # Display specific setting
-        current_value = config[setting]
-        if isinstance(current_value, list):
-            display_value = ", ".join(current_value)
-        else:
-            display_value = str(current_value)
-        
-        embed = create_embed(
-            title=f"⚙️ Configuration: {setting}",
-            description=f"Current value: `{display_value}`",
-            color=discord.Color.blue()
-        )
-        await ctx.send(embed=embed)
-        return
-    
-    # Update setting
-    try:
-        old_value = config[setting]
-        
-        if setting == "staff_roles":
-            config[setting] = [role.strip() for role in value.split(',')]
-        elif setting in ["application_cooldown", "min_hours", "status_command_cooldown"]:
-            config[setting] = int(value)
-        else:
-            config[setting] = value
-        
-        save_config(config)
-        
-        embed = create_embed(
-            title="✅ Configuration Updated",
-            description=f"Successfully updated `{setting}`",
-            color=discord.Color.green(),
-            fields=[
-                {
-                    "name": "📊 Changes",
-                    "value": f"**Before:** `{old_value}`\n**After:** `{config[setting]}`",
-                    "inline": False
-                }
-            ],
-            timestamp=True
-        )
-        await ctx.send(embed=embed)
-        
-    except ValueError as e:
-        embed = create_embed(
-            title="❌ Invalid Value",
-            description=f"Invalid value for `{setting}`: {str(e)}",
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed)
-    except Exception as e:
-        print(f"Error updating config: {str(e)}")
-        embed = create_embed(
-            title="⚠️ Configuration Error",
-            description=f"Error updating configuration: {str(e)}",
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed)
-
-# Error Handlers
-@bot.event
-async def on_command_error(ctx, error):
-    """Global command error handler"""
-    if isinstance(error, commands.CommandNotFound):
-        return  # Ignore unknown commands
-    
-    elif isinstance(error, commands.MissingPermissions):
-        embed = create_embed(
-            title="🔒 Missing Permissions",
-            description="You don't have permission to use this command.",
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed, delete_after=10)
-    
-    elif isinstance(error, commands.CheckFailure):
-        embed = create_embed(
-            title="❌ Access Denied",
-            description="You don't have the required role to use this command.",
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed, delete_after=10)
-    
-    elif isinstance(error, commands.MemberNotFound):
-        embed = create_embed(
-            title="👤 Member Not Found",
-            description="Could not find the specified member. Please check the username/mention and try again.",
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed, delete_after=10)
-    
-    elif isinstance(error, commands.BadArgument):
-        embed = create_embed(
-            title="❌ Invalid Argument",
-            description=f"Invalid argument provided: {str(error)}",
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed, delete_after=10)
-    
-    elif isinstance(error, commands.MissingRequiredArgument):
-        embed = create_embed(
-            title="📝 Missing Argument",
-            description=f"Missing required argument: `{error.param.name}`",
-            color=discord.Color.red(),
-            fields=[
-                {
-                    "name": "💡 Help",
-                    "value": f"Use `!help {ctx.command.name}` for usage information.",
-                    "inline": False
-                }
-            ]
-        )
-        await ctx.send(embed=embed, delete_after=15)
-    
-    else:
-        print(f"Unhandled error in {ctx.command}: {str(error)}")
-        embed = create_embed(
-            title="⚠️ Unexpected Error",
-            description="An unexpected error occurred. Please try again or contact an administrator.",
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed, delete_after=10)
-
-# Help Command Override
-@bot.command(name='help', help='Show help information')
+# Help Command
+@bot.command(name='help')
 async def help_command(ctx, command_name: str = None):
-    """Custom help command with better formatting"""
+    """Custom help command"""
     if command_name:
-        # Show help for specific command
         command = bot.get_command(command_name)
         if not command:
             embed = create_embed(
-                title="❌ Command Not Found",
-                description=f"No command named `{command_name}` found.",
+                title="❌ Error",
+                description="Command not found.",
                 color=discord.Color.red()
             )
             await ctx.send(embed=embed)
             return
         
         embed = create_embed(
-            title=f"📖 Help: {command.name}",
+            title=f"📖 {command.name}",
             description=command.help or "No description available.",
-            color=discord.Color.blue(),
-            fields=[
-                {
-                    "name": "📝 Usage",
-                    "value": f"`!{command.name} {command.signature}`",
-                    "inline": False
-                }
-            ]
+            color=discord.Color.blue()
         )
-        
-        if command.aliases:
-            embed.add_field(
-                name="🔄 Aliases",
-                value=", ".join(f"`{alias}`" for alias in command.aliases),
-                inline=False
-            )
-        
         await ctx.send(embed=embed)
         return
     
-    # Show general help
     embed = create_embed(
         title="🤖 Bot Commands",
-        description=f"**{bot.user.name}** - Project Zomboid Server Bot",
-        color=discord.Color.blue(),
-        thumbnail=bot.user.avatar.url if bot.user.avatar else None
+        description="Available commands:",
+        color=discord.Color.blue()
     )
     
-    # General Commands
-    general_commands = [
-        ("apply", "Apply to join the server"),
-        ("status", "Check server status and players"),
-        ("help", "Show this help message")
+    commands_list = [
+        ("!apply", "Apply to join the server"),
+        ("!status", "Check server status"),
+        ("!help", "Show this help message")
     ]
     
-    embed.add_field(
-        name="🎮 General Commands",
-        value="\n".join(f"`!{cmd}` - {desc}" for cmd, desc in general_commands),
-        inline=False
-    )
+    if has_staff_role(ctx):
+        commands_list.extend([
+            ("!approve @user", "Approve an application"),
+            ("!applications", "View applications")
+        ])
     
-    # Staff Commands
-    if has_staff_role(ctx.author):
-        staff_commands = [
-            ("approve <member>", "Approve a member's application"),
-            ("applications [status]", "View applications by status"),
-            ("clear [status]", "Clear applications by status")
-        ]
-        
-        embed.add_field(
-            name="👨‍💼 Staff Commands",
-            value="\n".join(f"`!{cmd}` - {desc}" for cmd, desc in staff_commands),
-            inline=False
-        )
-    
-    # Admin Commands
-    if ctx.author.guild_permissions.administrator:
-        admin_commands = [
-            ("config [setting] [value]", "View/modify bot configuration")
-        ]
-        
-        embed.add_field(
-            name="⚙️ Admin Commands",
-            value="\n".join(f"`!{cmd}` - {desc}" for cmd, desc in admin_commands),
-            inline=False
-        )
-    
-    embed.add_field(
-        name="📋 Additional Info",
-        value="Use `!help <command>` for detailed information about a specific command.",
-        inline=False
-    )
-    
-    embed.set_footer(text=f"Bot Version 2.0 | Prefix: !")
+    for cmd, desc in commands_list:
+        embed.add_field(name=cmd, value=desc, inline=False)
     
     await ctx.send(embed=embed)
 
-# Remove default help command
-bot.remove_command('help')
-
-# Utility Commands
-@bot.command(name='ping', help='Check bot latency')
-async def ping_command(ctx):
-    """Check bot latency"""
-    latency = round(bot.latency * 1000)
-    
-    if latency < 100:
-        color = discord.Color.green()
-        status = "🟢 Excellent"
-    elif latency < 200:
-        color = discord.Color.yellow()
-        status = "🟡 Good"
-    else:
-        color = discord.Color.red()
-        status = "🔴 Poor"
+# Error Handler
+@bot.event
+async def on_command_error(ctx, error):
+    """Global error handler"""
+    if isinstance(error, commands.CommandNotFound):
+        return
     
     embed = create_embed(
-        title="🏓 Pong!",
-        description=f"Bot latency: **{latency}ms**\nStatus: {status}",
-        color=color,
-        timestamp=True
+        title="⚠️ Error",
+        description=str(error),
+        color=discord.Color.red()
     )
-    
-    await ctx.send(embed=embed)
-
-@bot.command(name='info', help='Show bot information')
-async def info_command(ctx):
-    """Show bot and server information"""
-    embed = create_embed(
-        title="ℹ️ Bot Information",
-        description=f"**{bot.user.name}** - Project Zomboid Server Management Bot",
-        color=discord.Color.blue(),
-        thumbnail=bot.user.avatar.url if bot.user.avatar else None,
-        fields=[
-            {
-                "name": "🎮 Server Info",
-                "value": f"**Name:** {config['server_name']}\n**IP:** `{config['server_ip']}:{config['server_port']}`",
-                "inline": True
-            },
-            {
-                "name": "📊 Statistics",
-                "value": f"**Guilds:** {len(bot.guilds)}\n**Users:** {len(bot.users)}\n**Applications:** {len(applications)}",
-                "inline": True
-            },
-            {
-                "name": "⚙️ Configuration",
-                "value": f"**Prefix:** `!`\n**Apply Channel:** #{config['apply_channel']}\n**Member Role:** {config['member_role']}",
-                "inline": False
-            },
-            {
-                "name": "🔗 Links",
-                "value": "[Bot Source](https://github.com/sourcegraph/cody) • [Support](https://discord.gg/support)",
-                "inline": False
-            }
-        ],
-        timestamp=True,
-        footer=f"Bot ID: {bot.user.id}"
-    )
-# Initialize configuration
-# config = load_config()
-
-# Initialize configuration
-config = load_config()
+    await ctx.send(embed=embed, delete_after=10)
 
 # Main execution
 if __name__ == "__main__":
     try:
-        print("🚀 Starting bot...")
         bot.run(TOKEN)
-    except discord.LoginFailure:
-        print("❌ Invalid bot token. Please check your .env file.")
     except Exception as e:
-        print(f"❌ Failed to start bot: {str(e)}")
+        print(f"Error starting bot: {str(e)}")
