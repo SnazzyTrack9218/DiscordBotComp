@@ -99,9 +99,6 @@ def create_embed(title, description, color, **kwargs):
     if 'footer' in kwargs:
         embed.set_footer(text=kwargs['footer'])
     
-    if 'thumbnail' in kwargs:
-        embed.set_thumbnail(url=kwargs['thumbnail'])
-    
     if 'fields' in kwargs:
         for field in kwargs['fields']:
             embed.add_field(
@@ -132,7 +129,7 @@ async def get_server_status():
             "online": True,
             "player_count": info.player_count,
             "max_players": info.max_players,
-            "server_name": "HotBoxInZ",  # Force server name
+            "server_name": "HotBoxInZ",
             "players": players
         }
     except Exception as e:
@@ -427,7 +424,7 @@ class ApproveDeclineView(discord.ui.View):
         try:
             dm_embed = create_embed(
                 title="🎉 Application Approved!",
-                description="Your application has been approved!",
+                description="Your application has been approved! You now have access to the Project Zomboid server.",
                 color=discord.Color.green()
             )
             await member.send(embed=dm_embed)
@@ -446,7 +443,7 @@ class ApproveDeclineView(discord.ui.View):
         try:
             dm_embed = create_embed(
                 title="📋 Application Update",
-                description="Your application has been declined.",
+                description=f"Your application has been declined.\n\n**Reason:** {reason or 'No reason provided'}",
                 color=discord.Color.red()
             )
             await member.send(embed=dm_embed)
@@ -735,18 +732,26 @@ async def approve_command(ctx, member: discord.Member):
     if user_id not in applications or applications[user_id]["status"] != "pending":
         embed = create_embed(
             title="❌ Error",
-            description="No pending application found.",
+            description="No pending application found for this member.",
             color=discord.Color.red()
         )
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, delete_after=10)
         return
     
     application_data = applications[user_id]
     
     try:
         member_role = discord.utils.get(ctx.guild.roles, name=config["member_role"])
-        if member_role:
-            await member.add_roles(member_role)
+        if not member_role:
+            embed = create_embed(
+                title="⚠️ Error",
+                description=f"Role '{config['member_role']}' not found.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed, delete_after=10)
+            return
+        
+        await member.add_roles(member_role)
         
         applications[user_id]["status"] = "approved"
         applications[user_id]["processed_by"] = str(ctx.author.id)
@@ -754,12 +759,47 @@ async def approve_command(ctx, member: discord.Member):
         save_applications()
         
         embed = create_embed(
-            title="✅ Approved",
-            description=f"{member.mention}'s application has been approved.",
-            color=discord.Color.green()
+            title="✅ Application Approved",
+            description=f"{member.mention}'s application has been approved by {ctx.author.mention}.",
+            color=discord.Color.green(),
+            timestamp=True,
+            fields=[
+                {
+                    "name": "🔗 Steam Profile",
+                    "value": application_data["steam_link"],
+                    "inline": False
+                },
+                {
+                    "name": "⏱️ Hours Played",
+                    "value": application_data["hours_played"],
+                    "inline": True
+                }
+            ]
         )
         await ctx.send(embed=embed)
         
+        try:
+            dm_embed = create_embed(
+                title="🎉 Application Approved!",
+                description="Your application has been approved! You now have access to the Project Zomboid server.",
+                color=discord.Color.green()
+            )
+            await member.send(embed=dm_embed)
+        except discord.Forbidden:
+            embed.add_field(
+                name="📬 DM Status",
+                value="Could not send approval message to user",
+                inline=True
+            )
+            await ctx.send(embed=embed)
+        
+    except discord.Forbidden:
+        embed = create_embed(
+            title="⚠️ Error",
+            description="Failed to assign role (missing permissions).",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed, delete_after=10)
     except Exception as e:
         print(f"Error in approve command: {str(e)}")
         error_embed = create_embed(
@@ -767,7 +807,154 @@ async def approve_command(ctx, member: discord.Member):
             description=f"Error: {str(e)}",
             color=discord.Color.red()
         )
-        await ctx.send(embed=error_embed)
+        await ctx.send(embed=error_embed, delete_after=10)
+
+@bot.command(name='applications', help='View all applications (Staff only)')
+@commands.check(has_staff_role)
+async def applications_command(ctx):
+    """View all applications with pagination"""
+    if not applications:
+        embed = create_embed(
+            title="📋 Applications",
+            description="No applications found.",
+            color=discord.Color.blue()
+        )
+        await ctx.send(embed=embed, delete_after=10)
+        return
+
+    apps_per_page = 5
+    pages = []
+    current_page = []
+    count = 0
+
+    for user_id, app in applications.items():
+        try:
+            user = await bot.fetch_user(int(user_id))
+            user_display = user.display_name
+        except discord.NotFound:
+            user_display = f"Unknown User ({user_id})"
+
+        status_emoji = {
+            "pending": "⏳",
+            "approved": "✅",
+            "declined": "❌"
+        }.get(app["status"], "❓")
+
+        app_info = (
+            f"**User:** {user_display} (`{user_id}`)\n"
+            f"**Status:** {status_emoji} {app['status'].capitalize()}\n"
+            f"**Steam:** {app['steam_link']}\n"
+            f"**Hours:** {app['hours_played']}\n"
+            f"**Submitted:** {app['submitted_at'][:10]}\n"
+        )
+        if "processed_by" in app:
+            try:
+                processor = await bot.fetch_user(int(app["processed_by"]))
+                app_info += f"**Processed By:** {processor.display_name}\n"
+            except discord.NotFound:
+                app_info += f"**Processed By:** Unknown ({app['processed_by']})\n"
+        if app["status"] == "declined" and "reason" in app:
+            app_info += f"**Reason:** {app['reason']}\n"
+
+        current_page.append({"name": f"Application {count + 1}", "value": app_info, "inline": False})
+        count += 1
+
+        if count % apps_per_page == 0:
+            pages.append(current_page)
+            current_page = []
+
+    if current_page:
+        pages.append(current_page)
+
+    if not pages:
+        embed = create_embed(
+            title="📋 Applications",
+            description="No applications found.",
+            color=discord.Color.blue()
+        )
+        await ctx.send(embed=embed, delete_after=10)
+        return
+
+    class ApplicationPaginator(discord.ui.View):
+        def __init__(self, pages):
+            super().__init__(timeout=60)
+            self.pages = pages
+            self.current_page = 0
+
+        @discord.ui.button(label="Previous", style=discord.ButtonStyle.grey, disabled=True)
+        async def previous_button(self, interaction, button):
+            self.current_page -= 1
+            button.disabled = self.current_page == 0
+            self.children[1].disabled = False
+            embed = create_embed(
+                title="📋 Applications",
+                description=f"Page {self.current_page + 1} of {len(self.pages)}",
+                color=discord.Color.blue(),
+                fields=self.pages[self.current_page]
+            )
+            await interaction.response.edit_message(embed=embed, view=self)
+
+        @discord.ui.button(label="Next", style=discord.ButtonStyle.grey)
+        async def next_button(self, interaction, button):
+            self.current_page += 1
+            button.disabled = self.current_page == len(self.pages) - 1
+            self.children[0].disabled = False
+            embed = create_embed(
+                title="📋 Applications",
+                description=f"Page {self.current_page + 1} of {len(self.pages)}",
+                color=discord.Color.blue(),
+                fields=self.pages[self.current_page]
+            )
+            await interaction.response.edit_message(embed=embed, view=self)
+
+    embed = create_embed(
+        title="📋 Applications",
+        description=f"Page 1 of {len(pages)}",
+        color=discord.Color.blue(),
+        fields=pages[0]
+    )
+    view = ApplicationPaginator(pages)
+    if len(pages) == 1:
+        view.children[1].disabled = True
+    await ctx.send(embed=embed, view=view)
+
+@bot.command(name='clear', help='Clear applications by status (Staff only)')
+@commands.check(has_staff_role)
+async def clear_command(ctx, status: str):
+    """Clear applications by status (pending, approved, declined)"""
+    status = status.lower()
+    valid_statuses = ["pending", "approved", "declined"]
+    
+    if status not in valid_statuses:
+        embed = create_embed(
+            title="❌ Invalid Status",
+            description=f"Please specify a valid status: {', '.join(valid_statuses)}",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed, delete_after=10)
+        return
+
+    global applications
+    count = sum(1 for app in applications.values() if app["status"] == status)
+    
+    if count == 0:
+        embed = create_embed(
+            title="📋 Clear Applications",
+            description=f"No {status} applications found.",
+            color=discord.Color.blue()
+        )
+        await ctx.send(embed=embed, delete_after=10)
+        return
+
+    applications = {uid: app for uid, app in applications.items() if app["status"] != status}
+    save_applications()
+    
+    embed = create_embed(
+        title="✅ Applications Cleared",
+        description=f"Successfully cleared {count} {status} application(s).",
+        color=discord.Color.green()
+    )
+    await ctx.send(embed=embed)
 
 # Help Command
 @bot.command(name='help')
@@ -807,7 +994,8 @@ async def help_command(ctx, command_name: str = None):
     if has_staff_role(ctx):
         commands_list.extend([
             ("!approve @user", "Approve an application"),
-            ("!applications", "View applications")
+            ("!applications", "View applications"),
+            ("!clear <pending|approved|declined>", "Clear applications by status")
         ])
     
     for cmd, desc in commands_list:
