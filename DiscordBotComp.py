@@ -518,6 +518,17 @@ async def on_ready():
 @bot.command(name='apply', help='Apply to join the Project Zomboid server')
 async def apply_command(ctx):
     """Handle application command"""
+    # Check if user already has member role
+    member_role = discord.utils.get(ctx.guild.roles, name=config["member_role"])
+    if member_role in ctx.author.roles:
+        embed = create_embed(
+            title="❌ Already a Member",
+            description="You already have the member role and cannot apply again.",
+            color=discord.Color.red()
+        )
+        await ctx.author.send(embed=embed)
+        return
+
     if ctx.channel.name != config["apply_channel"]:
         embed = create_embed(
             title="❌ Wrong Channel",
