@@ -243,13 +243,22 @@ def create_status_embed(status, requester=None):
         timestamp=True
     )
     
-    # Add ping if available
+    # Add ping if available, format as integer ms
     if status["online"] and "performance" in status and status["performance"].get("ping") not in (None, "N/A"):
-        embed.add_field(
-            name="🏓 Ping",
-            value=f"{status['performance']['ping']} ms",
-            inline=True
-        )
+        try:
+            ping_val = status['performance']['ping']
+            ping_ms = int(round(float(ping_val)))
+            embed.add_field(
+                name="🏓 Ping",
+                value=f"{ping_ms} ms",
+                inline=True
+            )
+        except Exception:
+            embed.add_field(
+                name="🏓 Ping",
+                value=f"{status['performance']['ping']} ms",
+                inline=True
+            )
     
     # Add player list if online and not too many players
     if status["online"] and status["player_count"] > 0:
