@@ -232,6 +232,29 @@ async def status_error(ctx, error):
         await ctx.send(embed=embed)
 
 # Application System Classes
+class RulesConfirmationView(discord.ui.View):
+    """View for rules confirmation button"""
+    def __init__(self, user_id):
+        super().__init__(timeout=300.0)
+        self.user_id = user_id
+        self.confirmed = False
+
+    async def interaction_check(self, interaction):
+        """Check if the correct user is interacting"""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "❌ This button is for another user.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="✅ I Agree to the Rules", style=discord.ButtonStyle.green)
+    async def confirm_button(self, interaction, button):
+        """Handle rules confirmation"""
+        self.confirmed = True
+        self.stop()
+        await interaction.response.defer()
+
 class ApproveDeclineView(discord.ui.View):
     """View for approve/decline buttons on applications"""
     
@@ -494,9 +517,30 @@ async def apply_command(ctx):
     try:
         dm_channel = await ctx.author.create_dm()
         
+        # Rules confirmation
+        rules_embed = create_embed(
+            title="📋 Project Zomboid Server Application",
+            description="Before applying, please confirm you agree to follow the server rules.",
+            color=discord.Color.blue()
+        )
+        view = RulesConfirmationView(ctx.author.id)
+        await dm_channel.send(embed=rules_embed, view=view)
+        
+        # Wait for button interaction
+        await view.wait()
+        if not view.confirmed:
+            embed = create_embed(
+                title="❌ Application Cancelled",
+                description="You did not confirm the rules. Application process cancelled.",
+                color=discord.Color.red()
+            )
+            await dm_channel.send(embed=embed)
+            return
+        
+        # Proceed with application
         await dm_channel.send(embed=create_embed(
             title="📋 Application Process",
-            description="Please follow the prompts to complete your application for the Project Zomboid server.\nYou will need to provide:\n1. Your Steam profile link\n2. Your Project Zomboid play hours\nYou have 5 minutes to respond to each prompt.",
+            description="Please follow the prompts to complete your application for the Project Zomboid server.\n\n**You will need to provide:**\n- Your Steam profile link\n- Your Project Zomboid play hours\n\n**Note:** You have 5 minutes to respond to each prompt.",
             color=discord.Color.blue()
         ))
         
@@ -534,8 +578,8 @@ async def get_steam_profile(user, dm_channel):
         return m.author == user and m.channel == dm_channel
     
     embed = create_embed(
-        title="🔗 Steam Profile Link",
-        description="Please provide your Steam profile link (e.g., https://steamcommunity.com/id/yourprofile or https://steamcommunity.com/profiles/123456789).\nEnsure the link is valid and publicly accessible.",
+        title="📝 Step 1 of 3",
+        description="Please provide your Steam profile link\n\nExample: https://steamcommunity.com/id/yourname",
         color=discord.Color.blue()
     )
     await dm_channel.send(embed=embed)
@@ -550,7 +594,7 @@ async def get_steam_profile(user, dm_channel):
             
             embed = create_embed(
                 title="❌ Invalid Steam Profile",
-                description="Please provide a valid Steam profile link (e.g., https://steamcommunity.com/id/yourprofile).",
+                description="Please provide a valid Steam profile link (e.g., https://steamcommunity.com/id/yourname or https://steamcommunity.com/profiles/123456789).",
                 color=discord.Color.red()
             )
             await dm_channel.send(embed=embed)
@@ -564,8 +608,8 @@ async def get_hours_played(user, dm_channel):
         return m.author == user and m.channel == dm_channel
     
     embed = create_embed(
-        title="⏱️ Project Zomboid Hours",
-        description=f"Please enter the number of hours you have played Project Zomboid.\nYou can find this in your Steam library or profile.\nMinimum required hours: {config['min_hours']}",
+        title="📝 Step 2 of 3",
+        description="How many hours have you played Project Zomboid?\n\n💡 Tip: You can find this information on your Steam profile or in your Steam library.",
         color=discord.Color.blue()
     )
     await dm_channel.send(embed=embed)
@@ -582,17 +626,17 @@ async def confirm_application(user, dm_channel, steam_link, hours_played):
         return m.author == user and m.channel == dm_channel
     
     embed = create_embed(
-        title="📋 Confirm Application",
+        title="📝 Step 3 of 3: Confirm Application",
         description="Please review your application details below. Type **I confirm** to submit, or anything else to cancel.",
         color=discord.Color.blue(),
         fields=[
             {
-                "name": "🔗 Steam Profile",
+                "name": "Steam",
                 "value": steam_link,
                 "inline": False
             },
             {
-                "name": "⏱️ Hours Played",
+                "name": "Hours",
                 "value": hours_played,
                 "inline": True
             }
@@ -644,6 +688,11 @@ async def submit_application(ctx, steam_link, hours_played):
                 "name": "🔗 Steam Profile",
                 "value": steam_link,
                 "inline": False
+            },
+            {
+                "name": "⏱️ Hours Played",
+                "value": hours_played,
+                "inline": True
             }
         ]
     )
@@ -655,8 +704,15 @@ async def submit_application(ctx, steam_link, hours_played):
         
         success_embed = create_embed(
             title="✅ Application Submitted",
-            description="Your application has been submitted and is pending review by staff.",
-            color=discord.Color.green()
+            description="Your application has been successfully submitted to our staff team.\n\n⏳ **What's Next?**\nOur staff will review your application and get back to you soon. You'll receive a DM with the decision.",
+            color=discord.Color.green(),
+            fields=[
+                {
+                    "name": "📋 Application Details",
+                    "value": f"**Steam:** {steam_link}\n**Hours:** {hours_played}",
+                    "inline": False
+                }
+            ]
         )
         await ctx.author.send(embed=success_embed)
         
