@@ -1,3 +1,4 @@
+#MadeBy SnazzyTrack/RevR6
 import discord
 from discord.ext import commands, tasks
 import asyncio
