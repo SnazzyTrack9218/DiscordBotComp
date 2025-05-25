@@ -72,7 +72,7 @@ def load_applications():
     if os.path.exists('applications.json'):
         with open('applications.json', 'r') as f:
             applications = json.load(f)
-        for uid, app in applications.items():
+        for app in applications.values():
             app.setdefault("status", "pending")
             app.setdefault("steam_link", "N/A")
             app.setdefault("hours_played", "N/A")
@@ -227,7 +227,7 @@ class RulesConfirmationView(discord.ui.View):
         return True
 
     @discord.ui.button(label="✅ Agree", style=discord.ButtonStyle.green)
-    async def confirm_button(self, interaction, button):
+    async def confirm_button(self, interaction, _button):
         self.confirmed = True
         self.stop()
         await interaction.response.defer()
@@ -251,7 +251,7 @@ class ApplicationConfirmationView(discord.ui.View):
         await interaction.response.defer()
 
     @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red)
-    async def cancel_button(self, interaction, button):
+    async def cancel_button(self, interaction, _button):
         self.confirmed = False
         self.stop()
         await interaction.response.defer()
@@ -273,11 +273,11 @@ class ApproveDeclineView(discord.ui.View):
         return True
 
     @discord.ui.button(label="✅ Approve", style=discord.ButtonStyle.green)
-    async def approve_button(self, interaction, button):
+    async def approve_button(self, interaction, _button):
         await self._process_application(interaction, "approved")
 
     @discord.ui.button(label="❌ Decline", style=discord.ButtonStyle.red)
-    async def decline_button(self, interaction, button):
+    async def decline_button(self, interaction, _button):
         modal = DeclineReasonModal(self.applicant_id, self.application_data, self)
         await interaction.response.send_modal(modal)
 
@@ -310,7 +310,7 @@ class ApproveDeclineView(discord.ui.View):
             embed = create_embed(title="⚠️ Error", description=str(e), color=discord.Color.red())
             await interaction.response.edit_message(embed=embed, view=self)
 
-    def _create_approval_embed(self, user, member, staff_member):
+    def _create_approval_embed(self, user, _member, staff_member):
         embed = create_embed(
             title="✅ Approved",
             description=f"{user.display_name}'s application approved!",
