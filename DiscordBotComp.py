@@ -25,7 +25,8 @@ DEFAULT_CONFIG = {
     "server_port": "16269",
     "status_channel_id": "1374917255556628492",
     "server_name": "HotBoxInZ",
-    "status_command_cooldown": 30
+    "status_command_cooldown": 30,
+    "welcome_channel": "welcome"
 }
 
 # Initialize configuration first
