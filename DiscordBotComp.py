@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 import a2s
+import pytz
 
 # Load environment variables
 load_dotenv()
@@ -409,15 +410,20 @@ async def on_member_join(member):
         return
 
     # Calculate account age
-    account_age = (datetime.now() - member.created_at).days // 365
+    account_age = (datetime.now(pytz.UTC) - member.created_at).days // 365
     join_date = member.joined_at.strftime("%Y-%m-%d")
     
     # Create welcome embed
+    apply_channel = discord.utils.get(member.guild.text_channels, name=config['apply_channel'])
+    if not apply_channel:
+        print(f"Error: Apply channel {config['apply_channel']} not found")
+        return
+    
     embed = create_embed(
         title=f"🎉 Welcome {member.display_name}!",
         description=(
             f"Thanks for joining the **{config['server_name']}** server community!\n\n"
-            f"Please use the `!apply` command in the <#{discord.utils.get(member.guild.text_channels, name=config['apply_channel']).id}> channel to join."
+            f"Please use the `!apply` command in the <#{apply_channel.id}> channel to join."
         ),
         color=discord.Color.green(),
         fields=[
@@ -430,9 +436,9 @@ async def on_member_join(member):
     try:
         await welcome_channel.send(embed=embed)
     except discord.Forbidden:
-        print(f"Error: Bot lacks permission to send messages in channel ID {config['welcome_channel_id']}")
+        print(f"Error: Bot lacks permission to send messages in channel {welcome_channel.name} (ID: {config['welcome_channel_id']})")
     except Exception as e:
-        print(f"Error sending welcome message: {str(e)}")
+        print(f"Error sending welcome message to channel {welcome_channel.name if welcome_channel else 'unknown'} (ID: {config['welcome_channel_id']}): {str(e)}")
 
 # Application Commands
 @bot.command()
