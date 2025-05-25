@@ -52,7 +52,7 @@ config = load_config()
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
 # Data storage
 applications = {}
@@ -245,7 +245,7 @@ class ApplicationConfirmationView(discord.ui.View):
         return True
 
     @discord.ui.button(label="✅ Submit", style=discord.ButtonStyle.green)
-    async def confirm_button(self, interaction, button):
+    async def confirm_button(self, interaction, _button):
         self.confirmed = True
         self.stop()
         await interaction.response.defer()
@@ -767,9 +767,9 @@ async def applications(ctx):
             self.current_page = 0
 
         @discord.ui.button(label="Previous", style=discord.ButtonStyle.grey, disabled=True)
-        async def previous_button(self, interaction, button):
+        async def previous_button(self, interaction, _button):
             self.current_page -= 1
-            button.disabled = self.current_page == 0
+            self.children[0].disabled = self.current_page == 0
             self.children[1].disabled = False
             embed = create_embed(
                 title="📋 Applications",
@@ -780,9 +780,9 @@ async def applications(ctx):
             await interaction.response.edit_message(embed=embed, view=self)
 
         @discord.ui.button(label="Next", style=discord.ButtonStyle.grey)
-        async def next_button(self, interaction, button):
+        async def next_button(self, interaction, _button):
             self.current_page += 1
-            button.disabled = self.current_page == len(self.pages) - 1
+            self.children[1].disabled = self.current_page == len(self.pages) - 1
             self.children[0].disabled = False
             embed = create_embed(
                 title="📋 Applications",
