@@ -25,7 +25,7 @@ DEFAULT_CONFIG = {
     "status_channel_id": "1374917255556628492",
     "server_name": "HotBoxInZ",
     "status_command_cooldown": 30,
-    "welcome_channel": "welcome"
+    "welcome_channel_id": "1374133331330990094"
 }
 
 # Initialize configuration
@@ -398,38 +398,26 @@ async def on_ready():
 @bot.event
 async def on_member_join(member):
     """Send welcome message to new members"""
-    guild = member.guild
-    welcome_channel = discord.utils.get(guild.text_channels, name=config["welcome_channel"])
-    
-    # Fallback to channel ID if name-based lookup fails
+    welcome_channel = bot.get_channel(int(config["welcome_channel_id"]))
     if not welcome_channel:
-        try:
-            welcome_channel = guild.get_channel(int(config.get("welcome_channel_id")))
-        except (ValueError, TypeError):
-            print(f"Error: Welcome channel {config['welcome_channel']} or ID not found")
-            return
-    
-    if not welcome_channel:
-        print(f"Error: Welcome channel not found for guild {guild.id}")
-        return
-    
-    # Check if bot has permission to send messages
-    bot_member = guild.me
-    permissions = welcome_channel.permissions_for(bot_member)
-    if not permissions.send_messages:
-        print(f"Error: No permission to send messages in {welcome_channel.name} (ID: {welcome_channel.id})")
+        print(f"Error: Welcome channel ID {config['welcome_channel_id']} not found")
         return
 
+    # Calculate account age
     account_age = (datetime.now() - member.created_at).days // 365
     join_date = member.joined_at.strftime("%Y-%m-%d")
     
+    # Create welcome embed
     embed = create_embed(
         title=f"🎉 Welcome {member.display_name}!",
-        description=f"Welcome to **{config['server_name']}**!\nUse `!apply` in <#{discord.utils.get(guild.text_channels, name=config['apply_channel']).id}> to join.",
+        description=(
+            f"Thanks for joining the **{config['server_name']}** server community!\n\n"
+            f"Please use the `!apply` command in the <#{discord.utils.get(member.guild.text_channels, name=config['apply_channel']).id}> channel to join."
+        ),
         color=discord.Color.green(),
         fields=[
             {"name": "Account Age", "value": f"{account_age} years", "inline": True},
-            {"name": "Joined", "value": join_date, "inline": True}
+            {"name": "Joined", "value": f"{join_date}", "inline": True}
         ],
         thumbnail=member.avatar.url if member.avatar else member.default_avatar.url
     )
@@ -437,7 +425,7 @@ async def on_member_join(member):
     try:
         await welcome_channel.send(embed=embed)
     except discord.Forbidden:
-        print(f"Error: Forbidden to send message in {welcome_channel.name} (ID: {welcome_channel.id})")
+        print(f"Error: Bot lacks permission to send messages in channel ID {config['welcome_channel_id']}")
     except Exception as e:
         print(f"Error sending welcome message: {str(e)}")
 
