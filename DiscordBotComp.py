@@ -30,12 +30,15 @@ DEFAULT_CONFIG = {
 
 # Initialize configuration
 def load_config():
+    """Load configuration from file or create default"""
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r') as f:
                 content = f.read().strip()
                 if content:
-                    return json.loads(content)
+                    config = json.loads(content)
+                    print("Loaded config:", config)  # Debug print
+                    return config
                 print("Empty config.json, creating default")
         except json.JSONDecodeError:
             print("Invalid config.json, creating default")
@@ -44,6 +47,7 @@ def load_config():
     
     with open(CONFIG_FILE, 'w') as f:
         json.dump(DEFAULT_CONFIG, f, indent=4)
+    print("Created default config:", DEFAULT_CONFIG)  # Debug print
     return DEFAULT_CONFIG
 
 config = load_config()
