@@ -399,7 +399,7 @@ async def on_ready():
 async def on_member_join(member):
     """Send welcome message to new members"""
     guild = member.guild
-    welcome_channel = discord.utils.get(guild.text_channels, name=config["welcome_channel"])
+    welcome_channel = discord.utils.get(guild.text_channels, name=config["welcome"])
     
     # Fallback to channel ID if name-based lookup fails
     if not welcome_channel:
