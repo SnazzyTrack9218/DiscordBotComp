@@ -193,6 +193,32 @@ async def update_server_status():
         print(f"Error updating status: {str(e)}")
         server_status_message = None
 
+
+@tasks.loop(minutes=1.0)
+async def clean_status_channel():
+    """Delete messages in the status channel after 15 minutes, except the status embed."""
+    channel = bot.get_channel(int(config["status_channel_id"]))
+    if not channel:
+        print(f"Status channel {config['status_channel_id']} not found")
+        return
+
+    try:
+        async for message in channel.history(limit=100):
+            # Skip the persistent status embed
+            if message.id == server_status_message.id:
+                continue
+            # Check if message is older than 15 minutes
+            message_age = (datetime.now(pytz.UTC) - message.created_at).total_seconds()
+            if message_age >= 900:  # 15 minutes = 900 seconds
+                try:
+                    await message.delete()
+                except discord.Forbidden:
+                    print(f"Error: No permission to delete message {message.id} in channel {channel.id}")
+                except discord.NotFound:
+                    print(f"Error: Message {message.id} already deleted")
+    except Exception as e:
+        print(f"Error cleaning status channel: {str(e)}")
+
 # Commands
 @bot.command()
 @commands.cooldown(1, config.get("status_command_cooldown", 30), commands.BucketType.user)
