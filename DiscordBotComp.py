@@ -204,8 +204,8 @@ async def clean_status_channel():
 
     try:
         async for message in channel.history(limit=100):
-            # Skip the persistent status embed
-            if message.id == server_status_message.id:
+            # Skip the persistent status embed if it exists
+            if server_status_message and message.id == server_status_message.id:
                 continue
             # Check if message is older than 15 minutes
             message_age = (datetime.now(pytz.UTC) - message.created_at).total_seconds()
