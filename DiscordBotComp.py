@@ -426,6 +426,7 @@ async def on_ready():
     load_applications()
     await bot.change_presence(activity=discord.Game(name="Project Zomboid"))
     update_server_status.start()
+    clean_status_channel.start()
 
 @bot.event
 async def on_member_join(member):
